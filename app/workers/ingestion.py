@@ -1,0 +1,132 @@
+from pathlib import Path
+
+from sqlalchemy import select
+
+from app.core.sse import publisher
+from app.database.database import AsyncSessionLocal
+from app.models.document import Document
+from app.models.knowledge_base import KnowledgeBase
+from app.rag.pipeline.ingestion import IngestionPipeline
+from app.rag.chunking import RecursiveChunker
+from app.rag.loaders import LoaderFactory
+from app.rag.vectorstore import PgVectorStore
+from app.rag.embeddings import SentenceTransformerEmbedder
+
+async def ingest_document(ctx: dict, document_id: str):
+    print(f"[Worker] Starting ingestion: {document_id}")
+
+    async with AsyncSessionLocal() as db:
+
+        # 1. Fetch document
+        result = await db.execute(
+            select(Document).where(Document.id == document_id)
+        )
+
+        document = result.scalar_one_or_none()
+        print(f"[Worker] Fetched document: {document_id} - {document}")
+        if document is None:
+            raise ValueError(
+                f"Document {document_id} not found"
+            )
+
+        try:
+            kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == document.knowledge_base_id))
+            if kb is None:
+                raise ValueError(f"Knowledge base for document {document_id} not found")
+            # 2. Mark processing
+            document.status = "processing"
+            await db.commit()
+            await publisher.publish(
+                data={
+                    "document_id": document_id,
+                    "status": "processing",
+                    "filename": document.name,
+                    "message": "Document ingestion started",
+                },
+                event="ingestion_status",
+            )
+            # 3. Build RAG components
+            loader=LoaderFactory()
+            chunk_config = kb.chunking_config or {}
+            chunker=RecursiveChunker(
+                chunk_size=chunk_config.get("chunk_size", 1000),
+                chunk_overlap=chunk_config.get("chunk_overlap", 200),
+            )
+            embedding_config = kb.embedding_config or {}
+            embedding_model = embedding_config.get("model", "all-MiniLM-L6-v2")
+            embedder = SentenceTransformerEmbedder(model_name=embedding_model)
+            vector_store=PgVectorStore(db)
+            pipeline = IngestionPipeline(
+                loader_factory=loader,
+                chunker=chunker,
+                enbedder=embedder,
+                vector_store=vector_store,
+                document_id=document_id,
+                metadata={
+                    "filename": document.name,
+                    "type": document.mime_type,
+                    "size_bytes": document.size_bytes,
+                    "storage_path": document.storage_path,
+                    "knowledge_base_id": str(document.knowledge_base_id),
+                    "embedding_model": embedder.model_name,
+                    "embedding_dimension": embedder.dimension(),
+                },
+            )
+            # 4. Run ingestion
+            await pipeline.process(
+                file_path=Path(document.storage_path)
+            )
+
+            # 5. Mark completed
+            document.status = "completed"
+            await db.commit()
+            await publisher.publish(
+                data={
+                    "document_id": document_id,
+                    "status": "completed",
+                    "filename": document.name,
+                    "message": "Document ingestion completed",
+                },
+                event="ingestion_status",
+            )
+
+            print(
+                f"[Worker] Completed ingestion: {document_id}"
+            )
+
+            return {
+                "document_id": document_id,
+                "status": "completed",
+            }
+
+        except Exception as exc:
+
+            await db.rollback()
+
+            # Re-fetch/update if necessary
+            result = await db.execute(
+                select(Document).where(Document.id == document_id)
+            )
+
+            document = result.scalar_one_or_none()
+
+            if document:
+                document.status = "failed"
+                await db.commit()
+                await publisher.publish(
+                    data={
+                        "document_id": document_id,
+                        "status": "failed",
+                        "filename": document.name,
+                        "error": str(exc),
+                        "message": "Document ingestion failed",
+                    },
+                    event="ingestion_status",
+                )
+
+            print(
+                f"[Worker] Failed ingestion "
+                f"{document_id}: {exc}"
+            )
+
+            raise

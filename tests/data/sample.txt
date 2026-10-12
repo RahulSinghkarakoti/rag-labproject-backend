@@ -1,0 +1,19 @@
+RAG LAB is a retrieval augmented generation platform.
+
+The system allows users to upload documents and ask questions about their knowledge base.
+
+Documents are automatically processed by the ingestion pipeline.
+
+The ingestion pipeline loads documents, splits them into chunks, generates embeddings, and stores those embeddings inside a vector database.
+
+During a query, the system retrieves relevant chunks from the vector store.
+
+The retrieved context is then provided to a language model.
+
+The language model generates an answer based on the retrieved context.
+
+RAG LAB is designed with modular components so that the underlying embedding model, vector store, retriever, and generation model can be replaced later.
+
+The first version uses sensible defaults instead of exposing every implementation detail as a configuration option.
+
+Later versions can allow users to customize chunking, embeddings, retrieval, vector databases, generation models, and prompts.

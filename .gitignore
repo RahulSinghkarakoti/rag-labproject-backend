@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+.env
+
+# Virtual environments
+.venv
+.agents
+.aws
+.codex
+.pytest_cache
+
+
+graphify-out
+AGENTS.md
+start.sh
+
+uploaded_files
