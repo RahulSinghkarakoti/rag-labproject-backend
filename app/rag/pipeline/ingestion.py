@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -45,6 +46,9 @@ class IngestionPipeline:
                     "file_path": str(file_path)
                     }, event="ingestion_status")
         documents = self.loader_factory.load(file_path)
+        for document in documents:
+            # PostgreSQL text columns reject NUL bytes sometimes emitted by PDF extraction.
+            document.page_content = document.page_content.replace("\x00", "")
         await sendSSE(data={
                     "document_id": self.document_id,
                     "message": "Document loaded",
@@ -76,9 +80,26 @@ class IngestionPipeline:
                     "status": "embedding",
                     "file_path": str(file_path)
                 }, event="ingestion_status")
-        embeddings = self.embedder.embed_documents(
-            [chunk.page_content for chunk in chunks]
-        )
+        embeddings = []
+        batch_size = 16
+        for start in range(0, len(chunks), batch_size):
+            batch = chunks[start : start + batch_size]
+            embeddings.extend(
+                self.embedder.embed_documents([chunk.page_content for chunk in batch])
+            )
+            embedded_count = min(start + batch_size, len(chunks))
+            print(
+                f"[IngestionPipeline] Embedded {embedded_count}/{len(chunks)} chunks",
+                flush=True,
+            )
+            await sendSSE(data={
+                "document_id": self.document_id,
+                "message": "Document embedding progress",
+                "status": "embedding",
+                "file_path": str(file_path),
+                "embedded_count": embedded_count,
+                "total_chunks": len(chunks),
+            }, event="ingestion_status")
         await sendSSE(data={
                     "document_id": self.document_id,
                     "message": "Document embedded",
@@ -117,8 +138,11 @@ class IngestionPipeline:
 
 async def sendSSE(data: dict | None = None, event: str = "notification") -> None:
     """Helper function to send SSE notifications."""
-    print(f"[sendSSE] Sending SSE event: {event} with data: {data}")
-    await publisher.publish(
-        event=event,
-        data=data
-    )
+    print(f"[sendSSE] Sending SSE event: {event} with data: {data}", flush=True)
+    try:
+        await asyncio.wait_for(
+            publisher.publish(event=event, data=data),
+            timeout=2,
+        )
+    except Exception as exc:
+        print(f"[sendSSE] Publish skipped: {exc}", flush=True)

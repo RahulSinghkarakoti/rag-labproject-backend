@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -31,10 +31,13 @@ class StreamingProvider(RecordingProvider):
 @pytest.mark.anyio
 async def test_query_pipeline_generates_from_queries_documents_and_memory():
     provider = RecordingProvider()
-    thread = MagicMock(id=uuid4(), metadata_={"knowledge_base_ids": []})
+    thread = MagicMock(id=uuid4(), knowledge_bases=[])
     message = MagicMock(content="What is RAG?", sequence=1)
+    db = AsyncMock()
+    db.scalars.return_value = MagicMock()
+    db.scalars.return_value.all.return_value = []
     pipeline = QueryPipeline(
-        db=MagicMock(),
+        db=db,
         config={"generation": {"model": "gpt-4o", "temperature": 0.1, "max_tokens": 200}},
         run=MagicMock(),
         thread=thread,
@@ -56,11 +59,14 @@ async def test_query_pipeline_generates_from_queries_documents_and_memory():
 @pytest.mark.anyio
 async def test_query_pipeline_streams_and_assembles_response():
     provider = StreamingProvider()
+    db = AsyncMock()
+    db.scalars.return_value = MagicMock()
+    db.scalars.return_value.all.return_value = []
     pipeline = QueryPipeline(
-        db=MagicMock(),
+        db=db,
         config={"generation": {"model": "gpt-4o"}},
         run=MagicMock(),
-        thread=MagicMock(id=uuid4(), metadata_={"knowledge_base_ids": []}),
+        thread=MagicMock(id=uuid4(), knowledge_bases=[]),
         message=MagicMock(content="What is RAG?", sequence=1),
         provider=provider,
     )

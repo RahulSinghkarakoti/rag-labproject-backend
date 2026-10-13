@@ -1,5 +1,6 @@
 from typing import Any
 
+from app.core.model_config import SUPPORTED_RERANKING_MODELS
 from app.rag.model_registry import ModelRegistry
 from app.rag.reranking.base import BaseReranker
 
@@ -9,6 +10,12 @@ def _load_model(model_name: str):
 
 
 _load_model.cache_clear = ModelRegistry.clear_reranking_models
+
+
+def preload_reranking_models() -> None:
+    for model_name in SUPPORTED_RERANKING_MODELS:
+        print(f"[ModelRegistry] Loading reranking model: {model_name}", flush=True)
+        _load_model(model_name)
 
 
 class CrossEncoderReranker(BaseReranker):

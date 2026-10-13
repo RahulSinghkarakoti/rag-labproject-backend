@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.core.model_config import validate_embedding_model
 
 
 class ChunkingConfig(BaseModel):
@@ -13,6 +14,8 @@ class ChunkingConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"
     dimension: Optional[int] = 384
+
+    _validate_model = field_validator("model")(validate_embedding_model)
 
 
 class IndexingConfig(BaseModel):

@@ -7,6 +7,7 @@ from app.models.message import Message
 from app.models.run import Run
 from app.models.thread import Thread
 from app.models.knowledge_base import KnowledgeBase
+from app.models.thread_knowledge_base import thread_knowledge_bases
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.vectorstore import PgVectorStore
 from app.rag.query.transformer import transform_query
@@ -138,20 +139,18 @@ class QueryPipeline:
 
     async def _retrieve(self, queries: List[str]):
         """Run configured sparse+dense retrieval across the thread knowledge bases."""
-        thread_metadata = getattr(self.thread, "metadata_", None)
-        knowledge_base_ids = (
-            thread_metadata.get("knowledge_base_ids", [])
-            if isinstance(thread_metadata, dict)
-            else []
-        )
-        if not knowledge_base_ids:
-            return []
-
         knowledge_bases = (
             await self.db.scalars(
-                select(KnowledgeBase).where(KnowledgeBase.id.in_(knowledge_base_ids))
+                select(KnowledgeBase)
+                .join(
+                    thread_knowledge_bases,
+                    thread_knowledge_bases.c.knowledge_base_id == KnowledgeBase.id,
+                )
+                .where(thread_knowledge_bases.c.thread_id == self.thread.id)
             )
         ).all()
+        if not knowledge_bases:
+            return []
         retrieval_config = self.thread_config.retrieval
         if self.thread_config.reranking.enabled:
             retrieval_config = retrieval_config.model_copy(

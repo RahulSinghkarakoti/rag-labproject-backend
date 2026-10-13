@@ -6,6 +6,7 @@ from app.core.sse import publisher
 from app.database.database import AsyncSessionLocal
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
+from app.core.model_config import validate_embedding_model
 from app.rag.pipeline.ingestion import IngestionPipeline
 from app.rag.chunking import RecursiveChunker
 from app.rag.loaders import LoaderFactory
@@ -54,6 +55,8 @@ async def ingest_document(ctx: dict, document_id: str):
             )
             embedding_config = kb.embedding_config or {}
             embedding_model = embedding_config.get("model", "all-MiniLM-L6-v2")
+            validate_embedding_model(embedding_model)
+            print(f"[Worker] Using embedding model: {embedding_model}")
             embedder = SentenceTransformerEmbedder(model_name=embedding_model)
             vector_store=PgVectorStore(db)
             pipeline = IngestionPipeline(

@@ -1,6 +1,7 @@
 from sentence_transformers import SentenceTransformer
 
 from app.rag.embeddings.base import BaseEmbedder
+from app.core.model_config import SUPPORTED_EMBEDDING_MODELS
 from app.rag.model_registry import ModelRegistry
 
 
@@ -9,6 +10,12 @@ def _load_model(model_name: str) -> SentenceTransformer:
 
 
 _load_model.cache_clear = ModelRegistry.clear_embedding_models
+
+
+def preload_embedding_models() -> None:
+    for model_name in SUPPORTED_EMBEDDING_MODELS:
+        print(f"[ModelRegistry] Loading embedding model: {model_name}", flush=True)
+        _load_model(model_name)
 
 
 class SentenceTransformerEmbedder(BaseEmbedder):
@@ -54,4 +61,4 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         return embedding.tolist()
 
     def dimension(self) -> int:
-        return self.model.get_sentence_embedding_dimension()
+        return self.model.get_embedding_dimension()

@@ -1,6 +1,12 @@
 # app/schemas/thread.py (or inside app/api/threads.py)
 from typing import Any, Dict, Optional, List, Literal
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.core.model_config import (
+    validate_embedding_model,
+    validate_generation_model,
+    validate_reranking_model,
+)
+from app.schemas.knowledge_base import KnowledgeBaseResponse
 from uuid import UUID
 from datetime import datetime
 
@@ -68,6 +74,8 @@ class RetrievalConfig(BaseModel):
     sparse_model: str = Field(default="bm25", min_length=1, max_length=100)
     dense_model: str = Field(default="all-MiniLM-L6-v2", min_length=1, max_length=100)
 
+    _validate_dense_model = field_validator("dense_model")(validate_embedding_model)
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -80,13 +88,15 @@ class RerankingConfig(BaseModel):
     score_threshold: float | None = None
     return_documents: bool = True
 
+    _validate_model = field_validator("model")(validate_reranking_model)
+
     model_config = ConfigDict(extra="forbid")
 
 
 class GenerationConfig(BaseModel):
-    provider: Literal["openai", "groq", "gemini"] = "openai"
+    provider: Literal["openai", "groq", "gemini"] = "groq"
     llm_model: str = Field(
-        default="gpt-4o",
+        default="gpt-oss-120b",
         min_length=1,
         max_length=200,
         validation_alias=AliasChoices("llm_model", "model"),
@@ -108,18 +118,23 @@ class GenerationConfig(BaseModel):
     def resolve_provider_and_model(cls, data: Any) -> Any:
         if isinstance(data, dict):
             data = dict(data)
-            model_val = data.get("llm_model") or data.get("model") or "gpt-4o"
+            model_val = data.get("llm_model") or data.get("model") or "gpt-oss-120b"
             provider = data.get("provider")
 
             if not provider or provider == "none":
                 model_str = str(model_val).lower()
                 if "gemini" in model_str:
                     data["provider"] = "gemini"
-                elif any(m in model_str for m in ["llama", "mixtral", "gemma", "deepseek", "groq"]):
+                elif any(m in model_str for m in ["llama", "mixtral", "gemma", "deepseek", "gpt-oss", "groq"]):
                     data["provider"] = "groq"
                 else:
                     data["provider"] = "openai"
         return data
+
+    @model_validator(mode="after")
+    def validate_configured_model(self):
+        validate_generation_model(self.provider, self.llm_model)
+        return self
 
 
 class ThreadConfig(BaseModel):
@@ -147,6 +162,7 @@ class ThreadResponse(BaseModel):
     project_id: Optional[UUID]
     title: Optional[str]
     status: str
+    knowledge_bases: List[KnowledgeBaseResponse] = Field(default_factory=list)
     metadata: Optional[dict] = None
     created_at: datetime
     updated_at: datetime  

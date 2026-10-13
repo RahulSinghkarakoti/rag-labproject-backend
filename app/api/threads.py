@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select , func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from app.api.dependencies import get_current_user
@@ -28,7 +29,11 @@ router = APIRouter(prefix="/api", tags=["Threads"])
 
 
 async def _get_thread(thread_id: UUID, user_id: int, db: AsyncSession) -> Thread:
-    thread = await db.scalar(select(Thread).where(Thread.id == thread_id, Thread.user_id == user_id))
+    thread = await db.scalar(
+        select(Thread)
+        .options(selectinload(Thread.knowledge_bases))
+        .where(Thread.id == thread_id, Thread.user_id == user_id)
+    )
     if not thread:
         raise HTTPException(status_code=404, detail="Thread not found")
     return thread
@@ -50,7 +55,12 @@ async def _get_kbs(project_id: UUID, user_id: int, ids: list[UUID], db: AsyncSes
 async def get_project_threads(project_id: UUID, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
     if not await db.scalar(select(Project.id).where(Project.id == project_id, Project.user_id == current_user.id)):
         raise HTTPException(status_code=404, detail="Project not found")
-    threads = (await db.scalars(select(Thread).where(Thread.project_id == project_id, Thread.user_id == current_user.id).order_by(Thread.updated_at.desc()))).all()
+    threads = (await db.scalars(
+        select(Thread)
+        .options(selectinload(Thread.knowledge_bases))
+        .where(Thread.project_id == project_id, Thread.user_id == current_user.id)
+        .order_by(Thread.updated_at.desc())
+    )).all()
     return APIResponse(success=True, message="Threads retrieved successfully", data=[ThreadResponse.model_validate(t) for t in threads])
 
 
@@ -58,7 +68,7 @@ async def get_project_threads(project_id: UUID, current_user=Depends(get_current
 async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
     if not await db.scalar(select(Project.id).where(Project.id == project_id, Project.user_id == current_user.id)):
         raise HTTPException(status_code=404, detail="Project not found")
-    kb_ids, kbs = await _get_kbs(project_id, current_user.id, thread_data.knowledge_base_ids, db)
+    _, kbs = await _get_kbs(project_id, current_user.id, thread_data.knowledge_base_ids, db)
     config = thread_data.config.model_dump() if thread_data.config else {}
     pipeline = Pipeline(name=thread_data.title, description="Thread pipeline", project_id=project_id, user_id=current_user.id)
     db.add(pipeline)
@@ -66,13 +76,22 @@ async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_use
     version = PipelineVersion(version=1, config=config, pipeline_id=pipeline.id)
     db.add(version)
     await db.flush()
-    metadata = {**config, "knowledge_base_ids": [str(i) for i in kb_ids] }
-    thread = Thread(user_id=current_user.id, project_id=project_id, title=thread_data.title, status="active", 
-                    pipeline_id=str(pipeline.id), pipeline_version_id=str(version.id), metadata_=metadata)
+    metadata = config
+    thread = Thread(user_id=current_user.id,
+                    project_id=project_id,
+                    title=thread_data.title,
+                    status="active",
+                    pipeline_id=str(pipeline.id),
+                    pipeline_version_id=str(version.id),
+                    metadata_=metadata)
     thread.knowledge_bases = kbs
     db.add(thread)
     await db.commit()
-    await db.refresh(thread) 
+    thread = await db.scalar(
+        select(Thread)
+        .options(selectinload(Thread.knowledge_bases))
+        .where(Thread.id == thread.id)
+    )
     return APIResponse(success=True, message="Thread created successfully", data=ThreadResponse.model_validate(thread))
 
 
@@ -123,8 +142,6 @@ async def update_thread(thread_id: UUID, thread_data: ThreadUpdate, current_user
         current = dict(thread.metadata_ or {})
         latest = await db.scalar(select(PipelineVersion).where(PipelineVersion.pipeline_id == thread.pipeline_id).order_by(PipelineVersion.version.desc()))
         config_changed = incoming_config != (latest.config if latest else {})
-        if thread_data.knowledge_base_ids is not None:
-            current["knowledge_base_ids"] = [str(i) for i in thread_data.knowledge_base_ids]
         if config_changed:
             # print("Config changed, creating new pipeline version...",current)
             pipeline_id = thread.pipeline_id
