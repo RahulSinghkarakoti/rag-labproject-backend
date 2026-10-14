@@ -12,8 +12,8 @@ def _load_model(model_name: str):
 _load_model.cache_clear = ModelRegistry.clear_reranking_models
 
 
-def preload_reranking_models() -> None:
-    for model_name in SUPPORTED_RERANKING_MODELS:
+def preload_reranking_models(model_names: list[str] | None = None) -> None:
+    for model_name in SUPPORTED_RERANKING_MODELS if model_names is None else model_names:
         print(f"[ModelRegistry] Loading reranking model: {model_name}", flush=True)
         _load_model(model_name)
 

@@ -10,20 +10,19 @@ class ChunkingConfig(BaseModel):
     chunk_size: int = Field(default=1000, ge=100, le=4000)
     chunk_overlap: int = Field(default=200, ge=0, le=1000)
 
-
 class EmbeddingConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"
-    dimension: Optional[int] = 384
-
+    # dimension: Optional[int] = 384
     _validate_model = field_validator("model")(validate_embedding_model)
 
 
-class IndexingConfig(BaseModel):
-    retriever: Literal["similarity", "mmr", "similarity-score-threshold"] = "similarity"
-    top_k: int = Field(default=5, ge=1, le=20)
-    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
-    reranking: bool = True
-    citations: bool = True
+
+# class IndexingConfig(BaseModel):
+#     retriever: Literal["similarity", "mmr", "similarity-score-threshold"] = "similarity"
+#     top_k: int = Field(default=5, ge=1, le=20)
+#     similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+#     reranking: bool = True
+#     citations: bool = True
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
@@ -31,7 +30,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
     description: Optional[str] = None
     chunking_config: Optional[ChunkingConfig] = None
     embedding_config: Optional[EmbeddingConfig] = None
-    indexing_config: Optional[IndexingConfig] = None
+    # indexing_config: Optional[IndexingConfig] = None
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
@@ -39,7 +38,7 @@ class KnowledgeBaseUpdateRequest(BaseModel):
     description: Optional[str] = None
     chunking_config: Optional[ChunkingConfig] = None
     embedding_config: Optional[EmbeddingConfig] = None
-    indexing_config: Optional[IndexingConfig] = None
+    # indexing_config: Optional[IndexingConfig] = None
 
 
 class KnowledgeBaseResponse(BaseModel):

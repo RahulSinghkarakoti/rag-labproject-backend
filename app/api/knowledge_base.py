@@ -98,6 +98,7 @@ async def create_knowledge_base(
             "strategy": "recursive",
             "chunk_size": 1000,
             "chunk_overlap": 200,
+            "embedding_model": "all-MiniLM-L6-v2",
         }
     )
     embedding_dict = (
@@ -105,20 +106,9 @@ async def create_knowledge_base(
         if payload.embedding_config
         else {
             "model": "all-MiniLM-L6-v2",
-            "dimension": 384,
+            # "dimension": 384,
         }
-    )
-    indexing_dict = (
-        payload.indexing_config.model_dump()
-        if payload.indexing_config
-        else {
-            "retriever": "similarity",
-            "top_k": 5,
-            "similarity_threshold": 0.7,
-            "reranking": True,
-            "citations": True,
-        }
-    )
+    ) 
 
     new_kb = KnowledgeBase(
         project_id=project_id,
@@ -127,7 +117,7 @@ async def create_knowledge_base(
         description=payload.description,
         chunking_config=chunking_dict,
         embedding_config=embedding_dict,
-        indexing_config=indexing_dict,
+        indexing_config={},
         metadata_={},
     )
     db.add(new_kb)

@@ -72,7 +72,6 @@ class IngestionPipeline:
                     "chunk_count": len(chunks)
                 }, event="ingestion_status")
 
-        print(f"[IngestionPipeline] Chunked {len(documents)} document(s) into {len(chunks)} chunk(s)")
         # 3. Embed
         await sendSSE(data={
                     "document_id": self.document_id,
@@ -88,10 +87,6 @@ class IngestionPipeline:
                 self.embedder.embed_documents([chunk.page_content for chunk in batch])
             )
             embedded_count = min(start + batch_size, len(chunks))
-            print(
-                f"[IngestionPipeline] Embedded {embedded_count}/{len(chunks)} chunks",
-                flush=True,
-            )
             await sendSSE(data={
                 "document_id": self.document_id,
                 "message": "Document embedding progress",
@@ -138,11 +133,10 @@ class IngestionPipeline:
 
 async def sendSSE(data: dict | None = None, event: str = "notification") -> None:
     """Helper function to send SSE notifications."""
-    print(f"[sendSSE] Sending SSE event: {event} with data: {data}", flush=True)
     try:
         await asyncio.wait_for(
             publisher.publish(event=event, data=data),
             timeout=2,
         )
-    except Exception as exc:
-        print(f"[sendSSE] Publish skipped: {exc}", flush=True)
+    except Exception:
+        return

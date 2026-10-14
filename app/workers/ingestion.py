@@ -14,8 +14,6 @@ from app.rag.vectorstore import PgVectorStore
 from app.rag.embeddings import SentenceTransformerEmbedder
 
 async def ingest_document(ctx: dict, document_id: str):
-    print(f"[Worker] Starting ingestion: {document_id}")
-
     async with AsyncSessionLocal() as db:
 
         # 1. Fetch document
@@ -24,7 +22,6 @@ async def ingest_document(ctx: dict, document_id: str):
         )
 
         document = result.scalar_one_or_none()
-        print(f"[Worker] Fetched document: {document_id} - {document}")
         if document is None:
             raise ValueError(
                 f"Document {document_id} not found"
@@ -56,7 +53,6 @@ async def ingest_document(ctx: dict, document_id: str):
             embedding_config = kb.embedding_config or {}
             embedding_model = embedding_config.get("model", "all-MiniLM-L6-v2")
             validate_embedding_model(embedding_model)
-            print(f"[Worker] Using embedding model: {embedding_model}")
             embedder = SentenceTransformerEmbedder(model_name=embedding_model)
             vector_store=PgVectorStore(db)
             pipeline = IngestionPipeline(
@@ -93,10 +89,6 @@ async def ingest_document(ctx: dict, document_id: str):
                 event="ingestion_status",
             )
 
-            print(
-                f"[Worker] Completed ingestion: {document_id}"
-            )
-
             return {
                 "document_id": document_id,
                 "status": "completed",
@@ -126,10 +118,5 @@ async def ingest_document(ctx: dict, document_id: str):
                     },
                     event="ingestion_status",
                 )
-
-            print(
-                f"[Worker] Failed ingestion "
-                f"{document_id}: {exc}"
-            )
 
             raise

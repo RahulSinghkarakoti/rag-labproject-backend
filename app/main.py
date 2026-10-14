@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 
 from app.api.router import register_routers
@@ -7,6 +9,11 @@ from app.core.middleware import setup_cors
 
 from dotenv import load_dotenv 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 app = FastAPI(
     title="RAG API",

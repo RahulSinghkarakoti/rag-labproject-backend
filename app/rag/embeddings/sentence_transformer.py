@@ -12,8 +12,8 @@ def _load_model(model_name: str) -> SentenceTransformer:
 _load_model.cache_clear = ModelRegistry.clear_embedding_models
 
 
-def preload_embedding_models() -> None:
-    for model_name in SUPPORTED_EMBEDDING_MODELS:
+def preload_embedding_models(model_names: list[str] | None = None) -> None:
+    for model_name in SUPPORTED_EMBEDDING_MODELS if model_names is None else model_names:
         print(f"[ModelRegistry] Loading embedding model: {model_name}", flush=True)
         _load_model(model_name)
 
@@ -28,7 +28,6 @@ class SentenceTransformerEmbedder(BaseEmbedder):
         model_name: str = "all-MiniLM-L6-v2",
     ):
         self.model_name = model_name
-
         self.model = _load_model(model_name)
 
     def embed_documents(
