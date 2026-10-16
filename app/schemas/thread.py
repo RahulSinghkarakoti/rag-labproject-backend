@@ -170,7 +170,8 @@ class ThreadResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class MessageCreate(BaseModel):
-    content: str
+    content: Optional[str] = None
+    message_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 

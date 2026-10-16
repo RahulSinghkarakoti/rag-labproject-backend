@@ -1,7 +1,9 @@
 from typing import Any, List
 
+from langchain_core.prompts import PromptTemplate
+
 from app.rag.generation.base import BaseGenerationProvider
-from app.rag.query.base import BaseQueryTransformer, clean_queries
+from app.rag.query.base import BaseQueryTransformer, clean_queries, execute_prompt_chain
 from app.schemas.thread import QueryTransformationConfig
 
 
@@ -12,7 +14,7 @@ class StepBackTransformer(BaseQueryTransformer):
     principles, concepts, or background context.
     """
 
-    DEFAULT_PROMPT = (
+    DEFAULT_PROMPT = PromptTemplate.from_template(
         "You are an expert at step-back prompting. Given the following specific user question, "
         "generate a broader, higher-level conceptual question that steps back to retrieve "
         "the foundational principles, high-level background concepts, or definitions needed to answer it.\n"
@@ -33,11 +35,12 @@ class StepBackTransformer(BaseQueryTransformer):
             return []
 
         if config.prompt_template:
-            prompt = config.prompt_template.format(query=stripped)
+            prompt = PromptTemplate.from_template(config.prompt_template)
         else:
-            prompt = self.DEFAULT_PROMPT.format(query=stripped)
+            prompt = self.DEFAULT_PROMPT
 
-        raw_response = await provider.ainvoke(prompt)
+        inputs = {"query": stripped}
+        raw_response = await execute_prompt_chain(prompt, inputs, provider)
         step_back_list = clean_queries(raw_response, max_count=1, fallback_query=stripped)
         step_back_query = step_back_list[0] if step_back_list else stripped
 
@@ -45,3 +48,4 @@ class StepBackTransformer(BaseQueryTransformer):
             return [step_back_query, stripped]
 
         return [step_back_query]
+

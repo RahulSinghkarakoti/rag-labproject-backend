@@ -152,6 +152,49 @@ class QueryPipeline:
             "result": self._build_result(state, "".join(response_parts)),
         }
 
+    def as_runnable(self, stream: bool = False):
+        """
+        Exposes the pipeline as a standard LangChain Runnable.
+        Supports LCEL composition, .ainvoke(), and .astream() while preserving
+        all underlying factory configurations and step tracking.
+        """
+        from langchain_core.runnables import RunnableLambda
+
+        if stream:
+            async def _run_stream(inputs: Any):
+                query = self.message.content
+                if isinstance(inputs, dict):
+                    query = inputs.get("query") or inputs.get("question") or query
+                elif isinstance(inputs, str) and inputs.strip():
+                    query = inputs
+
+                original_content = self.message.content
+                self.message.content = query
+                try:
+                    async for event in self.execute_stream():
+                        yield event
+                finally:
+                    self.message.content = original_content
+
+            return RunnableLambda(_run_stream)
+
+        async def _run(inputs: Any):
+            query = self.message.content
+            if isinstance(inputs, dict):
+                query = inputs.get("query") or inputs.get("question") or query
+            elif isinstance(inputs, str) and inputs.strip():
+                query = inputs
+
+            original_content = self.message.content
+            self.message.content = query
+            try:
+                return await self.execute()
+            finally:
+                self.message.content = original_content
+
+        return RunnableLambda(_run)
+
+
     # ------------------------------------------------------------------
     # Prepare phase — runs all stages in sequence, returns PipelineState
     # ------------------------------------------------------------------

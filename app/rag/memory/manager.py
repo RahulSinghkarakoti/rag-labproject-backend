@@ -73,3 +73,31 @@ class MemoryManager:
                 exc_info=True,
             )
             return []
+
+    def to_langchain_messages(self, turns: list[dict[str, Any]]) -> list[Any]:
+        """Convert role/content turns into LangChain BaseMessage objects."""
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        lc_messages = []
+        for turn in turns:
+            role = turn.get("role", "user")
+            content = turn.get("content", "")
+            if not content:
+                continue
+            if role in {"user", "human"}:
+                lc_messages.append(HumanMessage(content=content))
+            elif role in {"assistant", "ai"}:
+                lc_messages.append(AIMessage(content=content))
+            elif role == "system":
+                lc_messages.append(SystemMessage(content=content))
+        return lc_messages
+
+    async def load_messages(
+        self,
+        thread_id: Any,
+        before_sequence: int | None,
+    ) -> list[Any]:
+        """Load prior conversation history directly as LangChain BaseMessage objects."""
+        turns = await self.load(thread_id=thread_id, before_sequence=before_sequence)
+        return self.to_langchain_messages(turns)
+

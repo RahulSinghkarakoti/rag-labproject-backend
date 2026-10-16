@@ -1,7 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select , func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from uuid import UUID
@@ -185,49 +185,26 @@ async def get_thread_messages(
     )
 
 
-@router.post("/threads/{thread_id}/messages")
-async def create_message(
-    thread_id: UUID,
-    message_data: MessageCreate,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-): 
-    
-    # 1. Fetch thread
-    thread = await db.scalar(
-        select(Thread).where(
-            Thread.id == thread_id,
-            Thread.user_id == current_user.id,
-        )
-    )
-
-    if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    # 2. Get current pipeline version
+async def _get_pipeline_version(thread: Thread, db: AsyncSession) -> PipelineVersion:
     pipeline_version = await db.scalar(
         select(PipelineVersion).where(
             PipelineVersion.id == thread.pipeline_version_id
         )
     )
-
     if not pipeline_version:
         raise HTTPException(
             status_code=400,
             detail="Thread has no active pipeline"
         )
+    return pipeline_version
 
-    last_sequence = await db.scalar(
-    select(func.max(Message.sequence))
-    .where(Message.thread_id == thread.id)
-    )
 
-    next_sequence = (last_sequence or 0) + 1
-    # 3. Create user message
-    user_message = Message(thread_id=thread.id,role="human",content=message_data.content,sequence= next_sequence,status="completed",)
-    db.add(user_message)
-    await db.flush()
-    # 4. Create Run
+async def _stream_chat_run(
+    thread: Thread,
+    user_message: Message,
+    pipeline_version: PipelineVersion,
+    db: AsyncSession,
+):
     run = Run(
         thread_id=thread.id,
         input_message_id=user_message.id,
@@ -239,7 +216,6 @@ async def create_message(
     await db.commit()
     await db.refresh(run)
 
-    # 5. Execute the RAG pipeline inside the SSE stream.
     engine = QueryEngine(db)
 
     async def event_generator():
@@ -256,3 +232,188 @@ async def create_message(
             yield {"event": event["type"], "data": json.dumps(event)}
 
     return create_sse_response(event_generator())
+
+
+@router.post("/threads/{thread_id}/messages")
+async def create_message(
+    thread_id: UUID,
+    message_data: MessageCreate,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    thread = await _get_thread(thread_id, current_user.id, db)
+    pipeline_version = await _get_pipeline_version(thread, db)
+
+    # 1. Edit / re-process an existing message if message_id is provided and valid
+    if message_data.message_id:
+        try:
+            target_uuid = UUID(str(message_data.message_id))
+        except (ValueError, TypeError):
+            target_uuid = None
+
+        if target_uuid:
+            target_message = await db.scalar(
+                select(Message).where(
+                    Message.id == target_uuid,
+                    Message.thread_id == thread.id,
+                )
+            )
+            if target_message:
+                if target_message.role == "assistant":
+                    user_message = None
+                    if target_message.parent_message_id:
+                        user_message = await db.scalar(
+                            select(Message).where(
+                                Message.id == target_message.parent_message_id,
+                                Message.thread_id == thread.id,
+                            )
+                        )
+                    if not user_message:
+                        user_message = await db.scalar(
+                            select(Message)
+                            .where(
+                                Message.thread_id == thread.id,
+                                Message.sequence < target_message.sequence,
+                                Message.role == "human",
+                            )
+                            .order_by(Message.sequence.desc())
+                            .limit(1)
+                        )
+                    if not user_message:
+                        raise HTTPException(status_code=400, detail="No preceding user message to reprocess")
+                    return await _stream_chat_run(thread, user_message, pipeline_version, db)
+                else:
+                    user_message = target_message
+                    if message_data.content:
+                        user_message.content = message_data.content
+
+                await db.execute(
+                    delete(Message).where(
+                        Message.thread_id == thread.id,
+                        Message.sequence > user_message.sequence,
+                    )
+                )
+                await db.commit()
+                return await _stream_chat_run(thread, user_message, pipeline_version, db)
+
+    # 2. Standard new message flow (new thread or resume conversation)
+    if not message_data.content:
+        raise HTTPException(status_code=400, detail="Message content is required")
+
+    last_sequence = await db.scalar(
+        select(func.max(Message.sequence)).where(Message.thread_id == thread.id)
+    )
+    next_sequence = (last_sequence or 0) + 1
+
+    user_message = Message(
+        thread_id=thread.id,
+        role="human",
+        content=message_data.content,
+        sequence=next_sequence,
+        status="completed",
+    )
+    db.add(user_message)
+    await db.flush()
+
+    return await _stream_chat_run(thread, user_message, pipeline_version, db)
+
+
+@router.put("/threads/{thread_id}/messages/{message_id}")
+@router.post("/threads/{thread_id}/messages/{message_id}/edit")
+async def edit_message(
+    thread_id: UUID,
+    message_id: UUID,
+    message_data: MessageCreate,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    thread = await _get_thread(thread_id, current_user.id, db)
+    pipeline_version = await _get_pipeline_version(thread, db)
+
+    target_message = await db.scalar(
+        select(Message).where(
+            Message.id == message_id,
+            Message.thread_id == thread.id,
+        )
+    )
+    if not target_message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if target_message.role != "human":
+        raise HTTPException(status_code=400, detail="Only user messages can be edited")
+
+    if message_data.content:
+        target_message.content = message_data.content
+
+    # shortcut: linear thread truncation drops subsequent messages on edit/retry instead of storing tree branches, upgrade when UI needs multi-branch history navigation.
+    await db.execute(
+        delete(Message).where(
+            Message.thread_id == thread.id,
+            Message.sequence > target_message.sequence,
+        )
+    )
+    await db.commit()
+
+    return await _stream_chat_run(thread, target_message, pipeline_version, db)
+
+
+@router.post("/threads/{thread_id}/retry")
+@router.post("/threads/{thread_id}/messages/{message_id}/retry")
+async def retry_message(
+    thread_id: UUID,
+    message_id: UUID | None = None,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    thread = await _get_thread(thread_id, current_user.id, db)
+    pipeline_version = await _get_pipeline_version(thread, db)
+
+    if message_id:
+        target_message = await db.scalar(
+            select(Message).where(
+                Message.id == message_id,
+                Message.thread_id == thread.id,
+            )
+        )
+        if not target_message:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        if target_message.role == "assistant":
+            user_message = None
+            if target_message.parent_message_id:
+                user_message = await db.scalar(
+                    select(Message).where(
+                        Message.id == target_message.parent_message_id,
+                        Message.thread_id == thread.id,
+                    )
+                )
+            if not user_message:
+                user_message = await db.scalar(
+                    select(Message)
+                    .where(
+                        Message.thread_id == thread.id,
+                        Message.sequence < target_message.sequence,
+                        Message.role == "human",
+                    )
+                    .order_by(Message.sequence.desc())
+                    .limit(1)
+                )
+            if not user_message:
+                raise HTTPException(status_code=400, detail="No preceding user message found to retry")
+        else:
+            user_message = target_message
+    else:
+        user_message = await db.scalar(
+            select(Message)
+            .where(
+                Message.thread_id == thread.id,
+                Message.role == "human",
+            )
+            .order_by(Message.sequence.desc())
+            .limit(1)
+        )
+        if not user_message:
+            raise HTTPException(status_code=400, detail="No user message found to retry")
+
+    return await _stream_chat_run(thread, user_message, pipeline_version, db)
+

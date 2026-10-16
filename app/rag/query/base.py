@@ -74,3 +74,28 @@ class BaseQueryTransformer(ABC):
         Transforms the input query into one or more retrieval query strings.
         """
         raise NotImplementedError
+
+
+async def execute_prompt_chain(
+    prompt: Any,
+    inputs: dict[str, Any],
+    provider: BaseGenerationProvider,
+) -> str:
+    """
+    Executes a prompt using a LangChain LCEL chain (prompt | model | StrOutputParser)
+    when the provider exposes a LangChain BaseChatModel, or falls back to provider.ainvoke.
+    """
+    model = getattr(provider, "model", None)
+    if model is not None and hasattr(model, "ainvoke"):
+        try:
+            from langchain_core.output_parsers import StrOutputParser
+
+            chain = prompt | model | StrOutputParser()
+            return await chain.ainvoke(inputs)
+        except Exception:
+            formatted = prompt.format(**inputs) if hasattr(prompt, "format") else str(prompt)
+            return await provider.ainvoke_safe(formatted)
+
+    formatted = prompt.format(**inputs) if hasattr(prompt, "format") else str(prompt)
+    return await provider.ainvoke(formatted)
+

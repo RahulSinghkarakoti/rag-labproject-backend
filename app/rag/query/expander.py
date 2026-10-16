@@ -1,7 +1,9 @@
 from typing import Any, List
 
+from langchain_core.prompts import PromptTemplate
+
 from app.rag.generation.base import BaseGenerationProvider
-from app.rag.query.base import BaseQueryTransformer, clean_queries
+from app.rag.query.base import BaseQueryTransformer, clean_queries, execute_prompt_chain
 from app.schemas.thread import QueryTransformationConfig
 
 
@@ -12,7 +14,7 @@ class MultiQueryExpander(BaseQueryTransformer):
     to overcome retrieval vocabulary mismatch and improve recall.
     """
 
-    DEFAULT_PROMPT = (
+    DEFAULT_PROMPT = PromptTemplate.from_template(
         "You are an AI assistant designed to optimize information retrieval. "
         "Given the user question, generate {count} diverse search queries from different perspectives "
         "and using alternative phrasing/terminology to retrieve relevant documents.\n"
@@ -34,11 +36,12 @@ class MultiQueryExpander(BaseQueryTransformer):
         count = max(1, min(config.query_count, 10))
 
         if config.prompt_template:
-            prompt = config.prompt_template.format(query=stripped, count=count)
+            prompt = PromptTemplate.from_template(config.prompt_template)
         else:
-            prompt = self.DEFAULT_PROMPT.format(query=stripped, count=count)
+            prompt = self.DEFAULT_PROMPT
 
-        raw_response = await provider.ainvoke(prompt)
+        inputs = {"query": stripped, "count": count}
+        raw_response = await execute_prompt_chain(prompt, inputs, provider)
         expanded = clean_queries(raw_response, max_count=count, fallback_query=stripped)
 
         if config.include_original:
@@ -46,3 +49,4 @@ class MultiQueryExpander(BaseQueryTransformer):
             return list(dict.fromkeys(all_queries))[: count + 1]
 
         return expanded or [stripped]
+
