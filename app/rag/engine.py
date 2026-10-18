@@ -216,7 +216,6 @@ class QueryEngine:
                     "document_ids": [doc.get("id") for doc in reranked_documents],
                     "temperature": generation.get("temperature"),
                     "max_tokens": generation.get("max_tokens"),
-                    "stream": False,
                 },
                 response={"content": result.get("response", "")},
                 status="completed",

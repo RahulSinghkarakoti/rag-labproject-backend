@@ -104,7 +104,6 @@ class GenerationConfig(BaseModel):
     )
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1000, ge=1, le=32000)
-    stream: bool = True
     citation_enforced: bool = False
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)

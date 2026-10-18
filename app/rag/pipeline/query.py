@@ -361,7 +361,11 @@ class QueryPipeline:
         :func:`~app.rag.memory.context.build_generation_prompt`.
         """
         self._log_stage("generation", "waiting")
-        prompt = build_generation_prompt(query, context)
+        prompt = build_generation_prompt(
+            query,
+            context,
+            citation_enforced=self.thread_config.generation.citation_enforced,
+        )
         response = await self.provider.ainvoke_safe(prompt)
         self._log_stage("generation", "completed")
         return response
@@ -374,7 +378,12 @@ class QueryPipeline:
         them into the final response string.
         """
         self._log_stage("generation", "waiting")
-        prompt = build_generation_prompt(query, context)
+        prompt = build_generation_prompt(
+            query,
+            context,
+            citation_enforced=self.thread_config.generation.citation_enforced,
+        )
         async for chunk in self.provider.astream(prompt):
             yield chunk
         self._log_stage("generation", "completed")
+
