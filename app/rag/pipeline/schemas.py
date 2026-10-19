@@ -31,3 +31,6 @@ class PipelineState:
     retrieved_documents: list[Any] = field(default_factory=list)
     reranked_documents: list[Any] = field(default_factory=list)
     context: str = ""
+    is_greeting: bool = False
+    greeting_response: str = ""
+

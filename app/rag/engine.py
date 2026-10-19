@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,8 +28,7 @@ class QueryEngine:
     ):
         """
         Execute one RAG/chat run using the pipeline version config.
-        Tracks run status (running -> completed / failed) and catches
-        model errors safely to protect internal credentials.
+        Tracks run status (running -> completed / failed / cancelled).
         """
         config = pipeline_version.config or {}
         now = datetime.now(timezone.utc)
@@ -61,6 +61,16 @@ class QueryEngine:
             await self.db.commit()
             return result
 
+        except (asyncio.CancelledError, GeneratorExit):
+            run.status = "cancelled"
+            run.completed_at = datetime.now(timezone.utc)
+            run.error = {
+                "code": "CANCELLED",
+                "message": "User stopped the retrieval or generation.",
+            }
+            await self.db.commit()
+            raise
+
         except Exception as exc:
             # Handle and sanitize backend model provider errors safely
             if isinstance(exc, AppException):
@@ -82,10 +92,12 @@ class QueryEngine:
             raise safe_exc
 
     async def run_stream(self, *, run: Run, thread: Thread, message: Message, pipeline_version: PipelineVersion):
-        """Stream generation tokens and persist the completed run afterward."""
+        """Stream generation tokens and handle cancellation/disconnection gracefully."""
         config = pipeline_version.config or {}
         run.started_at = datetime.now(timezone.utc)
         run.status = "running"
+        accumulated_tokens: list[str] = []
+
         try:
             provider: BaseGenerationProvider = self.provider_factory.create(config)
             pipeline = QueryPipeline(
@@ -98,6 +110,7 @@ class QueryEngine:
             )
             async for event in pipeline.execute_stream():
                 if event["type"] == "token":
+                    accumulated_tokens.append(event["content"])
                     yield event
                     continue
 
@@ -118,6 +131,37 @@ class QueryEngine:
                     "output_message_id": result["output_message_id"],
                     "response": result["response"],
                 }
+        except (asyncio.CancelledError, GeneratorExit, RuntimeError) as exc:
+            if isinstance(exc, RuntimeError) and "CancelledError" not in str(exc):
+                raise exc
+            partial_text = "".join(accumulated_tokens).strip()
+            if partial_text:
+                cancellation_text = f"{partial_text}\n\n[Generation stopped by user]"
+            else:
+                cancellation_text = "[Retrieval or generation stopped by user]"
+
+            run.status = "cancelled"
+            run.completed_at = datetime.now(timezone.utc)
+            run.error = {
+                "code": "CANCELLED",
+                "message": "User stopped the retrieval or generation.",
+            }
+
+            cancellation_message = Message(
+                thread_id=message.thread_id,
+                parent_message_id=message.id,
+                role="assistant",
+                content=cancellation_text,
+                sequence=(message.sequence or 0) + 1,
+                status="cancelled",
+                metadata_={"run_id": str(run.id)},
+            )
+            self.db.add(cancellation_message)
+            await self.db.flush()
+            run.output_message_id = cancellation_message.id
+            await self.db.commit()
+            raise
+
         except Exception as exc:
             safe_exc = exc if isinstance(exc, AppException) else sanitize_model_error(
                 exc,
@@ -133,6 +177,7 @@ class QueryEngine:
             }
             await self.db.commit()
             yield {"type": "error", "error": run.error}
+
 
     async def _persist_run_result(
         self,

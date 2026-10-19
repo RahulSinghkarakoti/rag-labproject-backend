@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -105,3 +106,48 @@ async def get_message_run_steps(
         message="Message run steps retrieved successfully",
         data=RunDetailsResponse.model_validate(run),
     )
+
+
+@router.post("/runs/{run_id}/cancel", response_model=APIResponse[RunDetailsResponse])
+async def cancel_run(
+    run_id: UUID,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Cancel an in-progress run and update its status in the database.
+    """
+    run = await _get_run_with_steps(run_id, current_user.id, db)
+    if run.status in ["completed", "failed", "cancelled"]:
+        return APIResponse(
+            success=True,
+            message=f"Run is already {run.status}",
+            data=RunDetailsResponse.model_validate(run),
+        )
+
+    now = datetime.now(timezone.utc)
+    run.status = "cancelled"
+    run.completed_at = now
+    run.error = {
+        "code": "CANCELLED",
+        "message": "User stopped the retrieval or generation.",
+    }
+
+    if run.output_message_id:
+        msg = await db.scalar(select(Message).where(Message.id == run.output_message_id))
+        if msg:
+            msg.status = "cancelled"
+            if not msg.content:
+                msg.content = "[Generation stopped by user]"
+            elif "[Generation stopped by user]" not in msg.content:
+                msg.content = f"{msg.content}\n\n[Generation stopped by user]"
+
+    await db.commit()
+    await db.refresh(run)
+
+    return APIResponse(
+        success=True,
+        message="Run cancelled successfully",
+        data=RunDetailsResponse.model_validate(run),
+    )
+
