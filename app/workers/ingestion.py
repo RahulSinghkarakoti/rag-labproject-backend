@@ -8,8 +8,9 @@ from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
 from app.core.model_config import validate_embedding_model
 from app.rag.pipeline.ingestion import IngestionPipeline
-from app.rag.chunking import RecursiveChunker
+from app.rag.chunking import ChunkerFactory
 from app.rag.loaders import LoaderFactory
+from app.rag.loaders.detector import FileTypeDetector
 from app.rag.vectorstore import PgVectorStore
 from app.rag.embeddings import SentenceTransformerEmbedder
 
@@ -44,17 +45,25 @@ async def ingest_document(ctx: dict, document_id: str):
                 event="ingestion_status",
             )
             # 3. Build RAG components
-            loader=LoaderFactory()
-            chunk_config = kb.chunking_config or {}
-            chunker=RecursiveChunker(
-                chunk_size=chunk_config.get("chunk_size", 1000),
-                chunk_overlap=chunk_config.get("chunk_overlap", 200),
-            )
+            loader = LoaderFactory()
+            detector = FileTypeDetector()
+            file_type = detector.detect(document.storage_path)
+
             embedding_config = kb.embedding_config or {}
             embedding_model = embedding_config.get("model", "all-MiniLM-L6-v2")
             validate_embedding_model(embedding_model)
             embedder = SentenceTransformerEmbedder(model_name=embedding_model)
-            vector_store=PgVectorStore(db)
+
+            chunk_config = kb.chunking_config or {}
+            chunker = ChunkerFactory.create(
+                strategy=chunk_config.get("strategy", "recursive"),
+                chunk_size=chunk_config.get("chunk_size", 1000),
+                chunk_overlap=chunk_config.get("chunk_overlap", 200),
+                file_type=file_type,
+                embedder=embedder,
+            )
+
+            vector_store = PgVectorStore(db)
             pipeline = IngestionPipeline(
                 loader_factory=loader,
                 chunker=chunker,
@@ -64,11 +73,14 @@ async def ingest_document(ctx: dict, document_id: str):
                 metadata={
                     "filename": document.name,
                     "type": document.mime_type,
+                    "file_type": file_type,
                     "size_bytes": document.size_bytes,
                     "storage_path": document.storage_path,
                     "knowledge_base_id": str(document.knowledge_base_id),
                     "embedding_model": embedder.model_name,
                     "embedding_dimension": embedder.dimension(),
+                    "chunking_strategy": chunker.strategy_name,
+                    "chunking_config": chunk_config,
                 },
             )
             # 4. Run ingestion

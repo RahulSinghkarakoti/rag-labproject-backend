@@ -20,4 +20,5 @@ graphify-out
 AGENTS.md
 start.sh
 
-uploaded_files
+uploaded_files/*
+!uploaded_files/.gitkeep
