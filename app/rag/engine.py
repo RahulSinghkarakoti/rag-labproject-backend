@@ -212,16 +212,19 @@ class QueryEngine:
                 "query_transformation",
                 {"query": message.content},
                 {"queries": transformed_queries},
+                config.get("query_transformation", {})
             ),
             (
                 "retrieval",
                 {"queries": transformed_queries},
                 {"documents": retrieved_documents},
+                config.get("retrieval", {})
             ),
             (
                 "reranking",
                 {"documents": retrieved_documents},
                 {"documents": reranked_documents},
+                config.get("reranking", {})
             ),
             (
                 "generation",
@@ -231,9 +234,10 @@ class QueryEngine:
                     "documents": reranked_documents,
                 },
                 {"response": result.get("response", "")},
+                config.get("generation", {})
             ),
         ]
-        for sequence, (step_type, step_input, step_output) in enumerate(steps, start=1):
+        for sequence, (step_type, step_input, step_output,config) in enumerate(steps, start=1):
             self.db.add(
                 RunStep(
                     run_id=run.id,
@@ -244,7 +248,7 @@ class QueryEngine:
                     output=step_output,
                     started_at=now,
                     completed_at=now,
-                    metadata_={},
+                    metadata_=config,
                 )
             )
 
