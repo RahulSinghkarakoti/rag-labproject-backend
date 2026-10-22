@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.rag.pipeline.ingestion import IngestionPipeline
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_ingestion_pipeline():
     """
     Smoke-test for IngestionPipeline.process().

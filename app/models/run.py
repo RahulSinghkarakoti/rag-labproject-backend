@@ -145,6 +145,8 @@ class RunStep(Base, UUIDMixin):
 
     output: Mapped[dict | None] = mapped_column(JSONB)
 
+    config: Mapped[dict | None] = mapped_column(JSONB)
+
     error: Mapped[dict | None] = mapped_column(JSONB)
 
     started_at: Mapped[datetime | None] = mapped_column(

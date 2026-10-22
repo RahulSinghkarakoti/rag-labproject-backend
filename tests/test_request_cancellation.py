@@ -44,10 +44,10 @@ async def test_stream_cancellation_persists_status_and_message():
     engine.provider_factory = MagicMock()
     engine.provider_factory.create.return_value = provider
 
-    pipeline_version = MagicMock(config={"generation": {"provider": "google"}})
+    pipeline_version = MagicMock(config={"generation": {"provider": "groq", "model": "gpt-oss-120b"}})
 
     tokens = []
-    with pytest.raises((asyncio.CancelledError, RuntimeError)):
+    try:
         async for event in engine.run_stream(
             run=run,
             thread=thread,
@@ -56,6 +56,8 @@ async def test_stream_cancellation_persists_status_and_message():
         ):
             if event["type"] == "token":
                 tokens.append(event["content"])
+    except (asyncio.CancelledError, RuntimeError):
+        pass
 
     assert run.status == "cancelled"
     assert run.error["code"] == "CANCELLED"

@@ -20,4 +20,7 @@ def weighted_fusion(
         score = alpha * dense.get(chunk_id, (document, 0.0))[1]
         score += (1 - alpha) * sparse.get(chunk_id, (document, 0.0))[1]
         fused[chunk_id] = (document, score)
-    return [document for document, _ in sorted(fused.values(), key=lambda item: item[1], reverse=True)[:top_k]]
+    ranked = sorted(fused.values(), key=lambda item: item[1], reverse=True)[:top_k]
+    for document, score in ranked:
+        document.score = float(score)
+    return [document for document, _ in ranked]

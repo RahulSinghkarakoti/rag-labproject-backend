@@ -38,22 +38,22 @@ async def test_query_pipeline_generates_from_queries_documents_and_memory():
     db.scalars.return_value.all.return_value = []
     pipeline = QueryPipeline(
         db=db,
-        config={"generation": {"model": "gpt-4o", "temperature": 0.1, "max_tokens": 200}},
+        config={"generation": {"model": "gpt-oss-120b", "temperature": 0.1, "max_tokens": 200}},
         run=MagicMock(),
         thread=thread,
         message=message,
         provider=provider,
     )
-    async def memory():
+    async def memory(**kwargs):
         return [{"role": "human", "content": "We discussed embeddings."}]
 
-    pipeline._load_memory = memory
+    pipeline.memory_manager.load = memory
 
     result = await pipeline.execute()
 
     assert result["response"] == "generated answer"
     assert "What is RAG?" in provider.prompts[0]
-    assert "We discussed embeddings." in provider.prompts[0]
+    assert "We discussed embeddings." in str(provider.prompts[0])
 
 
 @pytest.mark.anyio
@@ -64,7 +64,7 @@ async def test_query_pipeline_streams_and_assembles_response():
     db.scalars.return_value.all.return_value = []
     pipeline = QueryPipeline(
         db=db,
-        config={"generation": {"model": "gpt-4o"}},
+        config={"generation": {"model": "gpt-oss-120b"}},
         run=MagicMock(),
         thread=MagicMock(id=uuid4(), knowledge_bases=[]),
         message=MagicMock(content="What is RAG?", sequence=1),

@@ -38,7 +38,12 @@ class CrossEncoderReranker(BaseReranker):
         if self.score_threshold is not None:
             ranked = [item for item in ranked if item[1] >= self.score_threshold]
         ranked = ranked[:self.top_k]
-        return [document for document, _ in ranked] if self.return_documents else [score for _, score in ranked]
+        if self.return_documents:
+            for document, score in ranked:
+                document.rerank_score = float(score)
+            return [document for document, _ in ranked]
+        else:
+            return [score for _, score in ranked]
 
 
 def rerank_documents(queries: list[str], documents: list[Any], config) -> list[Any]:

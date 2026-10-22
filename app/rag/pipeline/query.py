@@ -91,6 +91,7 @@ class QueryPipeline:
         thread: Thread,
         message: Message,
         provider: BaseGenerationProvider,
+        run_manager: Any = None,
     ) -> None:
         self.db = db
         self.config = config
@@ -98,6 +99,7 @@ class QueryPipeline:
         self.thread = thread
         self.message = message
         self.provider = provider
+        self.run_manager = run_manager
 
         # ── vector store & retrieval ──────────────────────────────────────
         self.vector_store = PgVectorStore(db)
@@ -127,7 +129,7 @@ class QueryPipeline:
             provider_name=self.provider_name,
             model_name=self.model_name,
         )
-        self.executor = PipelineStepExecutor(self._pipeline_context)
+        self.executor = PipelineStepExecutor(self._pipeline_context, run_manager=self.run_manager)
 
         self._log_stage("pipeline", "waiting")
 
@@ -292,18 +294,24 @@ class QueryPipeline:
         transformed_queries: list[str] = await self.executor.run(
             "transformation",
             self._process_query(self.message.content, memory),
+            input_data={"query": self.message.content, "memory_length": len(memory)},
+            config=self.thread_config.query_transformation.model_dump(),
         )
 
         # 3. Retrieval — dense / sparse / hybrid / mmr across knowledge bases
         retrieved_documents = await self.executor.run(
             "retrieval",
             self._retrieve(transformed_queries),
+            input_data={"queries": transformed_queries},
+            config=self.thread_config.retrieval.model_dump(),
         )
 
         # 4. Reranking — cross-encoder reranking (skipped when disabled)
         reranked_documents = await self.executor.run(
             "reranking",
             self._rerank(transformed_queries, retrieved_documents),
+            input_data={"queries": transformed_queries, "document_count": len(retrieved_documents)},
+            config=self.thread_config.reranking.model_dump() if self.thread_config.reranking.enabled else None,
         )
 
         # 5. Context assembly — build the prompt context block
@@ -404,11 +412,21 @@ class QueryPipeline:
                 }
             )
 
-        return await self.retrieval_workflow.retrieve(
+        results = await self.retrieval_workflow.retrieve(
             queries,
             knowledge_bases,
             retrieval_config,
         )
+
+        if self.run_manager:
+            await self.run_manager.record_retrieval(
+                query=", ".join(queries),
+                retriever_type=retrieval_config.strategy,
+                top_k=retrieval_config.top_k,
+                documents=results,
+            )
+
+        return results
 
     async def _rerank(self, queries: List[str], documents):
         """
@@ -423,39 +441,71 @@ class QueryPipeline:
             return documents
         if not config.return_documents:
             config = config.model_copy(update={"return_documents": True})
-        return rerank_documents(queries, documents, config)
+        
+        results = rerank_documents(queries, documents, config)
+
+        if self.run_manager:
+            await self.run_manager.record_rerank(results)
+
+        return results
 
     async def _generate(self, query: str, context: str) -> str:
         """
         Generate a non-streaming answer using the configured LLM provider.
-
-        Prompt construction is delegated to
-        :func:`~app.rag.memory.context.build_generation_prompt`.
         """
         self._log_stage("generation", "waiting")
+        step = None
+        if self.run_manager:
+            step = await self.run_manager.start_step(
+                "generation",
+                input_data={"query": query, "context_length": len(context)},
+                config=self.thread_config.generation.model_dump(),
+            )
         prompt = build_generation_prompt(
             query,
             context,
             citation_enforced=self.thread_config.generation.citation_enforced,
         )
-        response = await self.provider.ainvoke_safe(prompt)
-        self._log_stage("generation", "completed")
-        return response
+        try:
+            response = await self.provider.ainvoke_safe(prompt)
+            self._log_stage("generation", "completed")
+            if self.run_manager and step:
+                await self.run_manager.complete_step(step, output_data={"response": response})
+            return response
+        except Exception as e:
+            self._log_stage("generation", "failed")
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, str(e))
+            raise
 
     async def _generate_stream(self, query: str, context: str):
         """
         Stream generation tokens from the configured LLM provider.
-
-        Yields raw text chunks; the caller is responsible for assembling
-        them into the final response string.
         """
         self._log_stage("generation", "waiting")
+        step = None
+        if self.run_manager:
+            step = await self.run_manager.start_step(
+                "generation",
+                input_data={"query": query, "context_length": len(context)},
+                config=self.thread_config.generation.model_dump(),
+            )
         prompt = build_generation_prompt(
             query,
             context,
             citation_enforced=self.thread_config.generation.citation_enforced,
         )
-        async for chunk in self.provider.astream(prompt):
-            yield chunk
-        self._log_stage("generation", "completed")
+        full_response = ""
+        try:
+            async for chunk in self.provider.astream(prompt):
+                full_response += chunk
+                yield chunk
+            self._log_stage("generation", "completed")
+            if self.run_manager and step:
+                await self.run_manager.complete_step(step, output_data={"response": full_response})
+        except Exception as e:
+            self._log_stage("generation", "failed")
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, str(e))
+            raise
 

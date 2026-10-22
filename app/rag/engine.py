@@ -1,3 +1,4 @@
+from typing import Any
 import asyncio
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,10 +14,15 @@ from app.rag.pipeline.query import QueryPipeline
 
 
 class QueryEngine:
-
-    def __init__(self, db: AsyncSession, provider_factory: ProviderModelFactory = provider_model_factory):
+    def __init__(
+        self,
+        db: AsyncSession,
+        provider_factory: ProviderModelFactory = provider_model_factory,
+        run_manager: Any = None,
+    ):
         self.db = db
         self.provider_factory = provider_factory
+        self.run_manager = run_manager
 
     async def run(
         self,
@@ -41,6 +47,7 @@ class QueryEngine:
                 db=self.db,
                 config=config,
                 run=run,
+                run_manager=self.run_manager,
                 thread=thread,
                 message=message,
                 provider=provider,
@@ -79,7 +86,9 @@ class QueryEngine:
                 gen_cfg = config.get("generation", {})
                 provider_name = gen_cfg.get("provider", "unknown")
                 model_name = gen_cfg.get("llm_model") or gen_cfg.get("model", "unknown")
-                safe_exc = sanitize_model_error(exc, provider=provider_name, model=model_name)
+                safe_exc = sanitize_model_error(
+                    exc, provider=provider_name, model=model_name
+                )
 
             run.status = "failed"
             run.completed_at = datetime.now(timezone.utc)
@@ -91,7 +100,14 @@ class QueryEngine:
             await self.db.commit()
             raise safe_exc
 
-    async def run_stream(self, *, run: Run, thread: Thread, message: Message, pipeline_version: PipelineVersion):
+    async def run_stream(
+        self,
+        *,
+        run: Run,
+        thread: Thread,
+        message: Message,
+        pipeline_version: PipelineVersion,
+    ):
         """Stream generation tokens and handle cancellation/disconnection gracefully."""
         config = pipeline_version.config or {}
         run.started_at = datetime.now(timezone.utc)
@@ -104,6 +120,7 @@ class QueryEngine:
                 db=self.db,
                 config=config,
                 run=run,
+                run_manager=self.run_manager,
                 thread=thread,
                 message=message,
                 provider=provider,
@@ -116,8 +133,8 @@ class QueryEngine:
 
                 result = event["result"]
                 await self._persist_run_result(
-                    run=run,
-                    message=message,
+                run=run,
+                message=message,
                     result=result,
                     config=config,
                     provider=provider,
@@ -163,10 +180,15 @@ class QueryEngine:
             raise
 
         except Exception as exc:
-            safe_exc = exc if isinstance(exc, AppException) else sanitize_model_error(
-                exc,
-                provider=config.get("generation", {}).get("provider", "unknown"),
-                model=config.get("generation", {}).get("llm_model") or config.get("generation", {}).get("model", "unknown"),
+            safe_exc = (
+                exc
+                if isinstance(exc, AppException)
+                else sanitize_model_error(
+                    exc,
+                    provider=config.get("generation", {}).get("provider", "unknown"),
+                    model=config.get("generation", {}).get("llm_model")
+                    or config.get("generation", {}).get("model", "unknown"),
+                )
             )
             run.status = "failed"
             run.completed_at = datetime.now(timezone.utc)
@@ -177,7 +199,6 @@ class QueryEngine:
             }
             await self.db.commit()
             yield {"type": "error", "error": run.error}
-
 
     async def _persist_run_result(
         self,
@@ -204,59 +225,14 @@ class QueryEngine:
         run.output_message_id = assistant_message.id
         result["output_message_id"] = str(assistant_message.id)
 
-        transformed_queries = result.get("transformed_queries", [])
-        retrieved_documents = result.get("retrieved_documents", [])
-        reranked_documents = result.get("reranked_documents", [])
-        steps = [
-            (
-                "query_transformation",
-                {"query": message.content},
-                {"queries": transformed_queries},
-                config.get("query_transformation", {})
-            ),
-            (
-                "retrieval",
-                {"queries": transformed_queries},
-                {"documents": retrieved_documents},
-                config.get("retrieval", {})
-            ),
-            (
-                "reranking",
-                {"documents": retrieved_documents},
-                {"documents": reranked_documents},
-                config.get("reranking", {})
-            ),
-            (
-                "generation",
-                {
-                    "query": message.content,
-                    "queries": transformed_queries,
-                    "documents": reranked_documents,
-                },
-                {"response": result.get("response", "")},
-                config.get("generation", {})
-            ),
-        ]
-        for sequence, (step_type, step_input, step_output,config) in enumerate(steps, start=1):
-            self.db.add(
-                RunStep(
-                    run_id=run.id,
-                    step_type=step_type,
-                    sequence=sequence,
-                    status="completed",
-                    input=step_input,
-                    output=step_output,
-                    started_at=now,
-                    completed_at=now,
-                    metadata_=config,
-                )
-            )
-
-        generation = config.get("generation", {})
-        provider_config = getattr(provider, "config", None)
-        self.db.add(
-            ModelCall(
-                run_id=run.id,
+        if self.run_manager:
+            generation = config.get("generation", {})
+            provider_config = getattr(provider, "config", None)
+            
+            transformed_queries = result.get("transformed_queries", [])
+            reranked_documents = result.get("reranked_documents", [])
+            
+            await self.run_manager.record_model_call(
                 provider=getattr(provider, "provider_name", generation.get("provider", "unknown")),
                 model=getattr(provider_config, "model", generation.get("model", "unknown")),
                 request={
@@ -269,5 +245,3 @@ class QueryEngine:
                 response={"content": result.get("response", "")},
                 status="completed",
             )
-        )
-

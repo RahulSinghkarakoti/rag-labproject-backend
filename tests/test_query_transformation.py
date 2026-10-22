@@ -55,9 +55,9 @@ def test_thread_config_defaults():
     assert config.reranking.top_n == 10
     assert config.reranking.top_k == 5
     assert config.reranking.batch_size == 16
-    assert config.generation.provider == "openai"
-    assert config.generation.llm_model == "gpt-4o"
-    assert config.generation.model == "gpt-4o"
+    assert config.generation.provider == "groq"
+    assert config.generation.llm_model == "gpt-oss-120b"
+    assert config.generation.model == "gpt-oss-120b"
 
 
 def test_thread_config_all_transformation_modes():
@@ -108,12 +108,12 @@ def test_generation_config_provider_auto_inference():
     assert cfg_gemini.provider == "gemini"
     assert cfg_gemini.model == "gemini-2.5-pro"
 
-    cfg_groq = GenerationConfig.model_validate({"model": "llama-3.3-70b-versatile"})
+    cfg_groq = GenerationConfig.model_validate({"model": "gpt-oss-120b"})
     assert cfg_groq.provider == "groq"
 
-    cfg_openai = GenerationConfig.model_validate({"llm_model": "gpt-4o"})
-    assert cfg_openai.provider == "openai"
-    assert cfg_openai.model == "gpt-4o"
+    cfg_groq = GenerationConfig.model_validate({"llm_model": "gpt-oss-120b"})
+    assert cfg_groq.provider == "groq"
+    assert cfg_groq.model == "gpt-oss-120b"
 
 
 # =========================================================================
@@ -282,22 +282,22 @@ async def test_processor_unsupported_mode():
 
 def test_sanitize_model_error_redacts_api_keys():
     raw_error = Exception("Invalid API Key: sk-proj-1234567890abcdef1234567890 provided for org.")
-    sanitized = sanitize_model_error(raw_error, provider="openai", model="gpt-4o")
+    sanitized = sanitize_model_error(raw_error, provider="groq", model="gpt-oss-120b")
 
     assert isinstance(sanitized, ModelProviderError)
     assert "sk-proj" not in str(sanitized.message)
     assert "sk-proj" not in str(sanitized.details)
     assert sanitized.details["error_type"] == "authentication_failed"
-    assert "Authentication failed for openai" in sanitized.message
+    assert "Authentication failed for groq" in sanitized.message
 
 
 def test_sanitize_model_error_rate_limit():
-    raw_error = Exception("429 Too Many Requests: Rate limit reached for groq llama-3.3-70b-versatile")
-    sanitized = sanitize_model_error(raw_error, provider="groq", model="llama-3.3-70b-versatile")
+    raw_error = Exception("429 Too Many Requests: Rate limit reached for groq gpt-oss-120b")
+    sanitized = sanitize_model_error(raw_error, provider="groq", model="gpt-oss-120b")
 
     assert sanitized.status_code == 429
     assert sanitized.details["error_type"] == "rate_limit_exceeded"
-    assert "llama-3.3-70b-versatile" in sanitized.message
+    assert "gpt-oss-120b" in sanitized.message
 
 
 def test_sanitize_model_error_model_not_found():
@@ -326,13 +326,15 @@ async def test_query_pipeline_execution():
     message_mock.sequence = 1
     run_mock = MagicMock()
     run_mock.id = uuid4()
-    db_mock = MagicMock()
+    db_mock = AsyncMock()
+    db_mock.scalars.return_value = MagicMock()
+    db_mock.scalars.return_value.all.return_value = []
 
     pipeline = QueryPipeline(
         db=db_mock,
         config={
             "query_transformation": {"mode": "rewrite", "include_original": True},
-            "generation": {"model": "gpt-4o"},
+            "generation": {"model": "gpt-oss-120b"},
         },
         run=run_mock,
         thread=thread_mock,

@@ -84,21 +84,23 @@ class RetrievalWorkflow:
  
             # 5. Apply the selected strategy globally across these queries
             if strategy == "dense":
-                selected = [
-                    doc for doc, _ in sorted(
-                        all_dense,
-                        key=lambda item: item[1],
-                        reverse=True,
-                    )[:config.top_k]
-                ]
+                selected = []
+                for doc, score in sorted(
+                    all_dense,
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[:config.top_k]:
+                    doc.score = float(score)
+                    selected.append(doc)
             elif strategy == "sparse":
-                selected = [
-                    doc for doc, _ in sorted(
-                        all_sparse,
-                        key=lambda item: item[1],
-                        reverse=True,
-                    )[:config.top_k]
-                ]
+                selected = []
+                for doc, score in sorted(
+                    all_sparse,
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[:config.top_k]:
+                    doc.score = float(score)
+                    selected.append(doc)
             elif strategy == "hybrid":
                 selected = weighted_fusion(
                     all_dense,

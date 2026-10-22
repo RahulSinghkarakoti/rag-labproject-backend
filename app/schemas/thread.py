@@ -45,8 +45,8 @@ class QueryTransformationConfig(BaseModel):
         if isinstance(data, dict):
             data = dict(data)
             mode = data.get("mode")
-            hyde_enabled = data.get("hyde_enabled")
-            multi_query_count = data.get("multi_query_count")
+            hyde_enabled = data.pop("hyde_enabled", None)
+            multi_query_count = data.pop("multi_query_count", None)
 
             # Resolve legacy boolean and count fields unambiguously
             if mode is None or mode == "none":

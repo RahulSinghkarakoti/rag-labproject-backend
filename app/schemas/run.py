@@ -10,9 +10,10 @@ class RunStepResponse(BaseModel):
     step_type: str
     sequence: int
     status: str
-    input: Optional[Dict[str, Any]] = None
-    output: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
+    input: Optional[Any] = None
+    output: Optional[Any] = None
+    config: Optional[Any] = None
+    error: Optional[Any] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
@@ -29,7 +30,7 @@ class RunDetailsResponse(BaseModel):
     status: str
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    error: Optional[Dict[str, Any]] = None
+    error: Optional[Any] = None
     steps: List[RunStepResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

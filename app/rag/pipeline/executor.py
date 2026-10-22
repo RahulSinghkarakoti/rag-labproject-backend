@@ -6,6 +6,7 @@ retrieval, reranking, generation) in a uniform try/finally block that emits
 structured log lines and elapsed-time measurements without the pipeline
 orchestrator having to repeat this boilerplate.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,22 +38,62 @@ class PipelineStepExecutor:
         queries = await executor.run("transformation", process_query(...))
     """
 
-    def __init__(self, context: PipelineContext) -> None:
+    def __init__(self, context: PipelineContext, run_manager: Any = None) -> None:
         self.context = context
+        self.run_manager = run_manager
 
-    async def run(self, step_name: str, coro: Coroutine[Any, Any, T] | Awaitable[T]) -> T:
+    def _format_output_for_db(self, step_name: str, result: Any) -> Any:
+        try:
+            from fastapi.encoders import jsonable_encoder
+
+            from app.models.document import Document
+        except ImportError:
+            jsonable_encoder = lambda x: x  # noqa
+        if isinstance(result, list):
+            if not result:
+                return []
+            # If the output is a list of objects that look like documents, truncate them
+            formatted_list = []
+            for item in result:
+                if hasattr(item, "id") and hasattr(item, "content"):
+                    formatted_list.append(
+                        {
+                            "id": str(item.id),
+                            "snippet": item.content[:200] + "..."
+                            if item.content and len(item.content) > 200
+                            else item.content,
+                            "score": getattr(item, "score", None),
+                            "rerank_score": getattr(item, "rerank_score", None),
+                        }
+                    )
+                else:
+                    try:
+                        formatted_list.append(jsonable_encoder(item))
+                    except Exception:
+                        formatted_list.append(str(item))
+            return formatted_list
+
+        elif isinstance(result, dict):
+            try:
+                return jsonable_encoder(result)
+            except Exception:
+                return {"count": len(result)}
+        else:
+            try:
+                return jsonable_encoder(result)
+            except Exception:
+                return str(result)
+
+    async def run(
+        self,
+        step_name: str,
+        coro: Coroutine[Any, Any, T] | Awaitable[T],
+        input_data: dict | None = None,
+        config: dict | None = None,
+    ) -> T:
         """
-        Await *coro* while logging timing and status for *step_name*.
-
-        Args:
-            step_name: Short label used in log output (e.g. ``"memory"``, ``"retrieval"``).
-            coro:      The coroutine to execute.
-
-        Returns:
-            Whatever *coro* returns.
-
-        Raises:
-            Re-raises any exception from *coro* after logging ``state=failed``.
+        Await *coro* while logging timing and status for *step_name*, and persisting
+        step lifecycle via *run_manager* if provided.
         """
         logger.info(
             "pipeline_step step=%s state=waiting run_id=%s provider=%s model=%s",
@@ -61,6 +102,38 @@ class PipelineStepExecutor:
             self.context.provider_name,
             self.context.model_name,
         )
+
+        if step_name == "memory":
+            # Skip persisting memory step in DB to reduce noise
+            start = time.monotonic()
+            try:
+                result = await coro
+                elapsed = time.monotonic() - start
+                logger.info(
+                    "pipeline_step step=%s state=completed elapsed=%.3fs run_id=%s",
+                    step_name,
+                    elapsed,
+                    self.context.run_id,
+                )
+                return result
+            except Exception as exc:
+                elapsed = time.monotonic() - start
+                logger.error(
+                    "pipeline_step step=%s state=failed elapsed=%.3fs run_id=%s",
+                    step_name,
+                    elapsed,
+                    self.context.run_id,
+                    exc_info=True,
+                )
+                raise
+
+        import asyncio
+
+        step = None
+        if self.run_manager:
+            step = await self.run_manager.start_step(
+                step_name, input_data=input_data, config=config
+            )
         start = time.monotonic()
         try:
             result = await coro
@@ -77,8 +150,26 @@ class PipelineStepExecutor:
                 count_str,
                 self.context.run_id,
             )
+            if self.run_manager and step:
+                out = self._format_output_for_db(step_name, result)
+                await self.run_manager.complete_step(
+                    step,
+                    output_data=out,
+                    metadata={"elapsed_seconds": round(elapsed, 4)},
+                )
             return result
-        except Exception:
+        except asyncio.CancelledError as exc:
+            elapsed = time.monotonic() - start
+            logger.warning(
+                "pipeline_step step=%s state=cancelled elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+            )
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, "Request cancelled by user")
+            raise
+        except Exception as exc:
             elapsed = time.monotonic() - start
             logger.error(
                 "pipeline_step step=%s state=failed elapsed=%.3fs run_id=%s",
@@ -87,4 +178,6 @@ class PipelineStepExecutor:
                 self.context.run_id,
                 exc_info=True,
             )
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, str(exc))
             raise

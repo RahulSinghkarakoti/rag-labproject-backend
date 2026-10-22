@@ -29,4 +29,6 @@ def maximal_marginal_relevance(
         best = max(candidates, key=score)
         candidates.remove(best)
         selected.append(best)
+    for document, relevance in selected:
+        document.score = float(relevance)
     return [document for document, _ in selected]

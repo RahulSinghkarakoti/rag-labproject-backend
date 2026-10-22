@@ -1,19 +1,22 @@
 import json
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func, delete
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from app.api.dependencies import get_current_user
+from app.core.sse import create_sse_response
 from app.database.database import get_db
-from app.models import Thread , Message , Run
+from app.models import Message, Run, Thread
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
 from app.models.pipeline import Pipeline, PipelineVersion
 from app.models.project import Project
+from app.rag import QueryEngine
 from app.schemas.common import APIResponse
+from app.schemas.pipeline import PipelineVersionResponse
 from app.schemas.thread import (
     MessageCreate,
     MessageResponse,
@@ -21,9 +24,6 @@ from app.schemas.thread import (
     ThreadResponse,
     ThreadUpdate,
 )
-from app.schemas.pipeline import PipelineVersionResponse
-from app.rag import QueryEngine
-from app.core.sse import create_sse_response
 
 router = APIRouter(prefix="/api", tags=["Threads"])
 
@@ -42,17 +42,20 @@ async def _get_thread(thread_id: UUID, user_id: int, db: AsyncSession) -> Thread
 async def _get_kbs(project_id: UUID, user_id: int, ids: list[UUID], db: AsyncSession):
     ids = list(dict.fromkeys(ids))
     kbs = list((await db.scalars(select(KnowledgeBase).where(
-        KnowledgeBase.id.in_(ids), KnowledgeBase.project_id == project_id, KnowledgeBase.user_id == user_id,
+        KnowledgeBase.id.in_(
+            ids), KnowledgeBase.project_id == project_id, KnowledgeBase.user_id == user_id,
     ))).all())
     if len(kbs) != len(ids):
-        raise HTTPException(status_code=404, detail="One or more knowledge bases not found")
+        raise HTTPException(
+            status_code=404, detail="One or more knowledge bases not found")
     if not ids or not await db.scalar(select(Document.id).where(Document.knowledge_base_id.in_(ids))):
-        raise HTTPException(status_code=400, detail="Select a knowledge base with at least one document")
+        raise HTTPException(
+            status_code=400, detail="Select a knowledge base with at least one document")
     return ids, kbs
 
 
 @router.get("/projects/{project_id}/threads")
-async def get_project_threads(project_id: UUID, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
+async def get_project_threads(project_id: UUID, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):  # noqa: B008
     if not await db.scalar(select(Project.id).where(Project.id == project_id, Project.user_id == current_user.id)):
         raise HTTPException(status_code=404, detail="Project not found")
     threads = (await db.scalars(
@@ -65,15 +68,17 @@ async def get_project_threads(project_id: UUID, current_user=Depends(get_current
 
 
 @router.post("/projects/{project_id}/threads", status_code=status.HTTP_201_CREATED)
-async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
+async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if not await db.scalar(select(Project.id).where(Project.id == project_id, Project.user_id == current_user.id)):
         raise HTTPException(status_code=404, detail="Project not found")
     _, kbs = await _get_kbs(project_id, current_user.id, thread_data.knowledge_base_ids, db)
     config = thread_data.config.model_dump() if thread_data.config else {}
-    pipeline = Pipeline(name=thread_data.title, description="Thread pipeline", project_id=project_id, user_id=current_user.id)
+    pipeline = Pipeline(name=thread_data.title, description="Thread pipeline",
+                        project_id=project_id, user_id=current_user.id)
     db.add(pipeline)
     await db.flush()
-    version = PipelineVersion(version=1, config=config, pipeline_id=pipeline.id)
+    version = PipelineVersion(
+        version=1, config=config, pipeline_id=pipeline.id)
     db.add(version)
     await db.flush()
     metadata = config
@@ -96,7 +101,7 @@ async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_use
 
 
 @router.get("/threads/{thread_id}")
-async def get_thread(thread_id: UUID, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
+async def get_thread(thread_id: UUID, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     thread = await _get_thread(thread_id, current_user.id, db)
     return APIResponse(success=True, message="Thread retrieved successfully", data=ThreadResponse.model_validate(thread))
 
@@ -117,7 +122,8 @@ async def get_latest_thread_pipeline_version(
         .order_by(PipelineVersion.version.desc())
     )
     if not version:
-        raise HTTPException(status_code=404, detail="Pipeline version not found")
+        raise HTTPException(
+            status_code=404, detail="Pipeline version not found")
 
     return APIResponse(
         success=True,
@@ -127,7 +133,7 @@ async def get_latest_thread_pipeline_version(
 
 
 @router.patch("/threads/{thread_id}")
-async def update_thread(thread_id: UUID, thread_data: ThreadUpdate, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
+async def update_thread(thread_id: UUID, thread_data: ThreadUpdate, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     thread = await _get_thread(thread_id, current_user.id, db)
 
     print("Updating thread with data:", thread_data)
@@ -145,7 +151,8 @@ async def update_thread(thread_id: UUID, thread_data: ThreadUpdate, current_user
         if config_changed:
             # print("Config changed, creating new pipeline version...",current)
             pipeline_id = thread.pipeline_id
-            version = PipelineVersion(version=(latest.version + 1 if latest else 1), config=incoming_config, pipeline_id=pipeline_id)
+            version = PipelineVersion(version=(
+                latest.version + 1 if latest else 1), config=incoming_config, pipeline_id=pipeline_id)
             db.add(version)
             await db.flush()
             thread.pipeline_version_id = version.id
@@ -157,7 +164,7 @@ async def update_thread(thread_id: UUID, thread_data: ThreadUpdate, current_user
 
 
 @router.delete("/threads/{thread_id}")
-async def delete_thread(thread_id: UUID, current_user=Depends(get_current_user), db: AsyncSession=Depends(get_db)):
+async def delete_thread(thread_id: UUID, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     thread = await _get_thread(thread_id, current_user.id, db)
     await db.delete(thread)
     await db.commit()
@@ -205,31 +212,45 @@ async def _stream_chat_run(
     pipeline_version: PipelineVersion,
     db: AsyncSession,
 ):
-    run = Run(
+    from app.rag.run_manager import RunManager
+    import asyncio
+    run_manager = RunManager(db)
+    run = await run_manager.start_run(
         thread_id=thread.id,
         input_message_id=user_message.id,
         pipeline_version_id=pipeline_version.id,
         run_type="chat",
-        status="running",
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
 
-    engine = QueryEngine(db)
+    engine = QueryEngine(db, run_manager=run_manager)
 
     async def event_generator():
-        yield {
-            "event": "started",
-            "data": json.dumps({"run_id": str(run.id), "message_id": str(user_message.id)}),
-        }
-        async for event in engine.run_stream(
-            message=user_message,
-            thread=thread,
-            pipeline_version=pipeline_version,
-            run=run,
-        ):
-            yield {"event": event["type"], "data": json.dumps(event)}
+        try:
+            yield {
+                "event": "started",
+                "data": json.dumps({"run_id": str(run.id), "message_id": str(user_message.id)}),
+            }
+            async for event in engine.run_stream(
+                message=user_message,
+                thread=thread,
+                pipeline_version=pipeline_version,
+                run=run,
+            ):
+                yield {"event": event["type"], "data": json.dumps(event)}
+            
+            if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
+                await run_manager.complete_run()
+        except asyncio.CancelledError:
+            # Handle client disconnection
+            if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
+                await run_manager.cancel_run()
+            raise
+        except Exception as e:
+            if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
+                await run_manager.fail_run(str(e))
+            raise
+
+    return create_sse_response(event_generator())
 
     return create_sse_response(event_generator())
 
@@ -280,7 +301,8 @@ async def create_message(
                             .limit(1)
                         )
                     if not user_message:
-                        raise HTTPException(status_code=400, detail="No preceding user message to reprocess")
+                        raise HTTPException(
+                            status_code=400, detail="No preceding user message to reprocess")
                     return await _stream_chat_run(thread, user_message, pipeline_version, db)
                 else:
                     user_message = target_message
@@ -298,10 +320,12 @@ async def create_message(
 
     # 2. Standard new message flow (new thread or resume conversation)
     if not message_data.content:
-        raise HTTPException(status_code=400, detail="Message content is required")
+        raise HTTPException(
+            status_code=400, detail="Message content is required")
 
     last_sequence = await db.scalar(
-        select(func.max(Message.sequence)).where(Message.thread_id == thread.id)
+        select(func.max(Message.sequence)).where(
+            Message.thread_id == thread.id)
     )
     next_sequence = (last_sequence or 0) + 1
 
@@ -340,7 +364,8 @@ async def edit_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     if target_message.role != "human":
-        raise HTTPException(status_code=400, detail="Only user messages can be edited")
+        raise HTTPException(
+            status_code=400, detail="Only user messages can be edited")
 
     if message_data.content:
         target_message.content = message_data.content
@@ -399,7 +424,8 @@ async def retry_message(
                     .limit(1)
                 )
             if not user_message:
-                raise HTTPException(status_code=400, detail="No preceding user message found to retry")
+                raise HTTPException(
+                    status_code=400, detail="No preceding user message found to retry")
         else:
             user_message = target_message
     else:
@@ -413,7 +439,7 @@ async def retry_message(
             .limit(1)
         )
         if not user_message:
-            raise HTTPException(status_code=400, detail="No user message found to retry")
+            raise HTTPException(
+                status_code=400, detail="No user message found to retry")
 
     return await _stream_chat_run(thread, user_message, pipeline_version, db)
-
