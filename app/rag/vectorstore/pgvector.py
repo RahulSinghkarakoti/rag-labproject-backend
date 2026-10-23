@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.models.document import DocumentChunk
 from app.rag.vectorstore.base import BaseVectorStore
@@ -100,6 +101,7 @@ class PgVectorStore(BaseVectorStore):
     ) -> list[tuple[DocumentChunk, float]]:
         stmt = (
             select(DocumentChunk)
+            .options(joinedload(DocumentChunk.document))
             .join(
                 Document,
                 Document.id == DocumentChunk.document_id,
@@ -156,7 +158,7 @@ class PgVectorStore(BaseVectorStore):
     ) -> list[DocumentChunk]:
         filters = filters or {}
         terms = [term for term in query.split() if term]
-        stmt = select(DocumentChunk).join(Document, Document.id == DocumentChunk.document_id)
+        stmt = select(DocumentChunk).options(joinedload(DocumentChunk.document)).join(Document, Document.id == DocumentChunk.document_id)
         if terms:
             # shortcut: SQL LIKE narrows candidates, acceptable for current corpora; move BM25 to database FTS at scale.
             from sqlalchemy import or_

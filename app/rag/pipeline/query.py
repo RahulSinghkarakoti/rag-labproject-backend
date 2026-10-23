@@ -343,11 +343,21 @@ class QueryPipeline:
             "transformed_queries": state.transformed_queries,
             "transformation_mode": self.thread_config.query_transformation.mode,
             "retrieved_documents": [
-                {"id": str(doc.id), "content": doc.content}
+                {
+                    "id": str(doc.id), 
+                    "content": doc.content,
+                    "name": doc.document.name if getattr(doc, "document", None) else "Unknown",
+                    "mime_type": doc.document.mime_type if getattr(doc, "document", None) else None
+                }
                 for doc in state.retrieved_documents
             ],
             "reranked_documents": [
-                {"id": str(doc.id), "content": doc.content}
+                {
+                    "id": str(doc.id), 
+                    "content": doc.content,
+                    "name": doc.document.name if getattr(doc, "document", None) else "Unknown",
+                    "mime_type": doc.document.mime_type if getattr(doc, "document", None) else None
+                }
                 for doc in state.reranked_documents
             ],
             "response": response,

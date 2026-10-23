@@ -211,6 +211,15 @@ class QueryEngine:
     ) -> None:
         """Persist the assistant message and the durable stages of a run."""
         now = datetime.now(timezone.utc)
+        docs = result.get("reranked_documents", []) or result.get("retrieved_documents", [])
+        citations = []
+        for i, doc in enumerate(docs, start=1):
+            citations.append({
+                "index": i,
+                "name": doc.get("name", "Unknown"),
+                "mime_type": doc.get("mime_type")
+            })
+
         assistant_message = Message(
             thread_id=message.thread_id,
             parent_message_id=message.id,
@@ -218,7 +227,10 @@ class QueryEngine:
             content=result.get("response", ""),
             sequence=(message.sequence or 0) + 1,
             status="completed",
-            metadata_={"run_id": str(run.id)},
+            metadata_={
+                "run_id": str(run.id),
+                "citations": citations
+            },
         )
         self.db.add(assistant_message)
         await self.db.flush()
