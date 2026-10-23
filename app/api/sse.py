@@ -1,7 +1,6 @@
 from typing import Any
 
 from fastapi import APIRouter, Request
-from sse_starlette.sse import EventSourceResponse
 
 from app.core.sse import create_sse_response, publisher
 

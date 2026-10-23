@@ -92,9 +92,9 @@ async def upload_multiple_files(
             continue
 
         # Save to disk
+        import anyio
         file_path = UPLOAD_DIR / file.filename
-        with file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        await anyio.Path(file_path).write_bytes(await file.read())
 
         db_doc = Document(
             knowledge_base_id=kb_id,

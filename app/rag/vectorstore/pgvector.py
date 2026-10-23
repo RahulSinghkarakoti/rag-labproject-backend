@@ -39,6 +39,7 @@ class PgVectorStore(BaseVectorStore):
 
         chunks = []
 
+        batch_size = 100
         for index, (document, embedding) in enumerate(
             zip(documents, embeddings)
         ):
@@ -70,10 +71,16 @@ class PgVectorStore(BaseVectorStore):
             )
 
             chunks.append(chunk)
+            
+            if len(chunks) >= batch_size:
+                self.db.add_all(chunks)
+                await self.db.flush()
+                chunks = []
 
-        self.db.add_all(chunks)
-        print(f"[PgVectorStore] Added {len(chunks)} chunks for document {document_id}")
-        await self.db.flush()
+        if chunks:
+            self.db.add_all(chunks)
+            await self.db.flush()
+        print(f"[PgVectorStore] Added {len(documents)} chunks for document {document_id}")
 
     async def similarity_search(
         self,

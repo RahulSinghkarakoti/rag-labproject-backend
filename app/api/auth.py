@@ -66,11 +66,6 @@ async def oauth_login(
             )
         )
         user = result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(
-                status_code=500,
-                detail="OAuth account has no user",
-            )
     else:
         # 3. Check whether email already exists
         result = await db.execute(
@@ -79,18 +74,22 @@ async def oauth_login(
             )
         )
         user = result.scalar_one_or_none()
-        # 4. Create user if necessary
-        if not user:
-            user = User(
-                # id=uuid.uuid4(),
-                email=data.email,
-                name=data.name,
-                avatar_url=data.avatar_url,
-                is_active=True,
-                is_verified=True,
+        if user:
+            raise HTTPException(
+                status_code=400,
+                detail="An account with this email already exists. Please log in with your original provider.",
             )
-            db.add(user)
-            await db.flush()
+        
+        # 4. Create user if necessary
+        user = User(
+            email=data.email,
+            name=data.name,
+            avatar_url=data.avatar_url,
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(user)
+        await db.flush()
         # 5. Create provider connection
         oauth_account = OAuthAccount(
             user_id=user.id,

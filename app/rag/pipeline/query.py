@@ -45,30 +45,6 @@ from app.schemas.thread import ThreadConfig
 logger = logging.getLogger(__name__)
 
 
-GREETINGS = {
-    "hi", "hello", "hey", "hola", "namaste", "greetings", "howdy",
-    "good morning", "good afternoon", "good evening", "good day",
-    "hi there", "hello there", "hey there", "what's up", "whats up", "sup",
-    "how are you", "how are u", "hi how are you", "hello how are you",
-    "hi how are u", "hello how are u", "how do you do"
-}
-
-
-def is_greeting_query(query: str) -> bool:
-    cleaned = query.strip().lower().rstrip("!.,?")
-    if cleaned in GREETINGS:
-        return True
-    words = cleaned.split()
-    if len(words) <= 3 and any(w in GREETINGS for w in words):
-        question_words = {
-            "where", "what", "how", "why", "who", "which", "can", "could",
-            "would", "is", "are", "tell", "explain", "find", "search", "show"
-        }
-        if not any(w in question_words for w in words):
-            return True
-    return False
-
-
 class QueryPipeline:
 
     """
@@ -249,37 +225,6 @@ class QueryPipeline:
         self._log_stage("prepare", "waiting")
 
         # Fast path: greeting check to skip expensive LLM/vector search pipeline
-        if is_greeting_query(self.message.content):
-            knowledge_bases = (
-                await self.db.scalars(
-                    select(KnowledgeBase)
-                    .join(
-                        thread_knowledge_bases,
-                        thread_knowledge_bases.c.knowledge_base_id == KnowledgeBase.id,
-                    )
-                    .where(thread_knowledge_bases.c.thread_id == self.thread.id)
-                )
-            ).all()
-
-            if knowledge_bases:
-                kb_names = ", ".join(f"**{kb.name}**" for kb in knowledge_bases)
-                greeting_text = (
-                    f"Hi! How are you? What would you like to get info from your "
-                    f"knowledge base containing {kb_names}?"
-                )
-            else:
-                greeting_text = "Hi! How are you? What would you like to get info from your knowledge base?"
-
-            self._log_stage("prepare", "greeting_bypassed")
-            return PipelineState(
-                memory=[],
-                transformed_queries=[self.message.content],
-                retrieved_documents=[],
-                reranked_documents=[],
-                context="",
-                is_greeting=True,
-                greeting_response=greeting_text,
-            )
 
         # 1. Memory — load prior conversation turns
         memory: list[dict[str, Any]] = await self.executor.run(

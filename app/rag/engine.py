@@ -151,32 +151,38 @@ class QueryEngine:
         except (asyncio.CancelledError, GeneratorExit, RuntimeError) as exc:
             if isinstance(exc, RuntimeError) and "CancelledError" not in str(exc):
                 raise exc
-            partial_text = "".join(accumulated_tokens).strip()
-            if partial_text:
-                cancellation_text = f"{partial_text}\n\n[Generation stopped by user]"
-            else:
-                cancellation_text = "[Retrieval or generation stopped by user]"
+            
+            from app.database.database import AsyncSessionLocal
+            import asyncio
+            
+            async def _mark_cancelled(r_id, m_id, thread_id, seq, p_text):
+                try:
+                    async with AsyncSessionLocal() as session:
+                        from app.models.run import Run
+                        from app.models.message import Message
+                        c_run = await session.get(Run, r_id)
+                        if not c_run: return
+                        c_run.status = "cancelled"
+                        c_run.completed_at = datetime.now(timezone.utc)
+                        c_run.error = {"code": "CANCELLED", "message": "User stopped generation."}
+                        c_msg = Message(
+                            thread_id=thread_id,
+                            parent_message_id=m_id,
+                            role="assistant",
+                            content=f"{p_text}\n\n[Generation stopped by user]" if p_text else "[Stopped by user]",
+                            sequence=(seq or 0) + 1,
+                            status="cancelled",
+                            metadata_={"run_id": str(r_id)},
+                        )
+                        session.add(c_msg)
+                        await session.flush()
+                        c_run.output_message_id = c_msg.id
+                        await session.commit()
+                except Exception:
+                    pass
 
-            run.status = "cancelled"
-            run.completed_at = datetime.now(timezone.utc)
-            run.error = {
-                "code": "CANCELLED",
-                "message": "User stopped the retrieval or generation.",
-            }
-
-            cancellation_message = Message(
-                thread_id=message.thread_id,
-                parent_message_id=message.id,
-                role="assistant",
-                content=cancellation_text,
-                sequence=(message.sequence or 0) + 1,
-                status="cancelled",
-                metadata_={"run_id": str(run.id)},
-            )
-            self.db.add(cancellation_message)
-            await self.db.flush()
-            run.output_message_id = cancellation_message.id
-            await self.db.commit()
+            p_text = "".join(accumulated_tokens).strip()
+            asyncio.create_task(_mark_cancelled(run.id, message.id, message.thread_id, message.sequence, p_text))
             raise
 
         except Exception as exc:

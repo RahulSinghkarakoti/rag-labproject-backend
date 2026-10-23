@@ -17,9 +17,9 @@ from app.rag.embeddings import SentenceTransformerEmbedder
 async def ingest_document(ctx: dict, document_id: str):
     async with AsyncSessionLocal() as db:
 
-        # 1. Fetch document
+        # 1. Fetch document with row lock
         result = await db.execute(
-            select(Document).where(Document.id == document_id)
+            select(Document).where(Document.id == document_id).with_for_update()
         )
 
         document = result.scalar_one_or_none()
