@@ -5,6 +5,7 @@ from app.workers import ingest_document
 from app.rag.embeddings import preload_embedding_models
 from app.rag.model_registry import ModelRegistry
 from app.rag.reranking import preload_reranking_models
+from app.core.config import settings
 from app.core.lifespan import _configured_models
 from app.core.model_config import SUPPORTED_EMBEDDING_MODELS, SUPPORTED_RERANKING_MODELS
 
@@ -24,7 +25,7 @@ async def shutdown(ctx):
 # ARQ Worker Settings
 class WorkerSettings:
     functions = [ingest_document]
-    redis_settings = RedisSettings(host="localhost", port=6379)
+    redis_settings = RedisSettings(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
     job_timeout = 1800
 
     on_startup = startup

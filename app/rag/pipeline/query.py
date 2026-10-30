@@ -19,6 +19,7 @@ strategy) all flow from that config — no hard-coded choices here.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, List
 
@@ -358,13 +359,14 @@ class QueryPipeline:
         retrieval_config = self.thread_config.retrieval
         if self.thread_config.reranking.enabled:
             # Expand top_k so the reranker has enough candidates.
+            expanded_top_k = max(
+                retrieval_config.top_k,
+                self.thread_config.reranking.top_n,
+            )
+            # Divide by the number of sub-questions so total fetched remains bounded
+            fetch_per_query = max(1, expanded_top_k // max(1, len(queries)))
             retrieval_config = retrieval_config.model_copy(
-                update={
-                    "top_k": max(
-                        retrieval_config.top_k,
-                        self.thread_config.reranking.top_n,
-                    )
-                }
+                update={"top_k": fetch_per_query}
             )
 
         results = await self.retrieval_workflow.retrieve(
@@ -397,7 +399,7 @@ class QueryPipeline:
         if not config.return_documents:
             config = config.model_copy(update={"return_documents": True})
         
-        results = rerank_documents(queries, documents, config)
+        results = await asyncio.to_thread(rerank_documents, queries, documents, config)
 
         if self.run_manager:
             await self.run_manager.record_rerank(results)
@@ -408,59 +410,34 @@ class QueryPipeline:
         """
         Generate a non-streaming answer using the configured LLM provider.
         """
-        self._log_stage("generation", "waiting")
-        step = None
-        if self.run_manager:
-            step = await self.run_manager.start_step(
-                "generation",
-                input_data={"query": query, "context_length": len(context)},
-                config=self.thread_config.generation.model_dump(),
-            )
         prompt = build_generation_prompt(
             query,
             context,
             citation_enforced=self.thread_config.generation.citation_enforced,
         )
-        try:
-            response = await self.provider.ainvoke_safe(prompt)
-            self._log_stage("generation", "completed")
-            if self.run_manager and step:
-                await self.run_manager.complete_step(step, output_data={"response": response})
-            return response
-        except Exception as e:
-            self._log_stage("generation", "failed")
-            if self.run_manager and step:
-                await self.run_manager.fail_step(step, str(e))
-            raise
+        return await self.executor.run(
+            "generation",
+            self.provider.ainvoke_safe(prompt),
+            input_data={"query": query, "context_length": len(context)},
+            config=self.thread_config.generation.model_dump(),
+        )
 
     async def _generate_stream(self, query: str, context: str):
         """
         Stream generation tokens from the configured LLM provider.
         """
-        self._log_stage("generation", "waiting")
-        step = None
-        if self.run_manager:
-            step = await self.run_manager.start_step(
-                "generation",
-                input_data={"query": query, "context_length": len(context)},
-                config=self.thread_config.generation.model_dump(),
-            )
         prompt = build_generation_prompt(
             query,
             context,
             citation_enforced=self.thread_config.generation.citation_enforced,
         )
-        full_response = ""
-        try:
+        
+        async with self.executor.stream_step(
+            "generation",
+            input_data={"query": query, "context_length": len(context)},
+            config=self.thread_config.generation.model_dump(),
+        ) as step_result:
             async for chunk in self.provider.astream(prompt):
-                full_response += chunk
+                step_result["response"] += chunk
                 yield chunk
-            self._log_stage("generation", "completed")
-            if self.run_manager and step:
-                await self.run_manager.complete_step(step, output_data={"response": full_response})
-        except Exception as e:
-            self._log_stage("generation", "failed")
-            if self.run_manager and step:
-                await self.run_manager.fail_step(step, str(e))
-            raise
 

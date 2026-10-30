@@ -86,8 +86,8 @@ async def create_thread(project_id: UUID, thread_data: ThreadCreate, current_use
                     project_id=project_id,
                     title=thread_data.title,
                     status="active",
-                    pipeline_id=str(pipeline.id),
-                    pipeline_version_id=str(version.id),
+                    pipeline_id=pipeline.id,
+                    pipeline_version_id=version.id,
                     metadata_=metadata)
     thread.knowledge_bases = kbs
     db.add(thread)
@@ -193,10 +193,13 @@ async def get_thread_messages(
 
 
 async def _get_pipeline_version(thread: Thread, db: AsyncSession) -> PipelineVersion:
+    if not thread.pipeline_id:
+        raise HTTPException(status_code=400, detail="Thread has no active pipeline")
     pipeline_version = await db.scalar(
-        select(PipelineVersion).where(
-            PipelineVersion.id == thread.pipeline_version_id
-        )
+        select(PipelineVersion)
+        .where(PipelineVersion.pipeline_id == thread.pipeline_id)
+        .order_by(PipelineVersion.version.desc())
+        .limit(1)
     )
     if not pipeline_version:
         raise HTTPException(
@@ -303,7 +306,6 @@ async def create_message(
                     if not user_message:
                         raise HTTPException(
                             status_code=400, detail="No preceding user message to reprocess")
-                    return await _stream_chat_run(thread, user_message, pipeline_version, db)
                 else:
                     user_message = target_message
                     if message_data.content:
@@ -337,7 +339,8 @@ async def create_message(
         status="completed",
     )
     db.add(user_message)
-    await db.flush()
+    await db.commit()
+    await db.refresh(user_message)
 
     return await _stream_chat_run(thread, user_message, pipeline_version, db)
 
@@ -441,5 +444,13 @@ async def retry_message(
         if not user_message:
             raise HTTPException(
                 status_code=400, detail="No user message found to retry")
+
+    await db.execute(
+        delete(Message).where(
+            Message.thread_id == thread.id,
+            Message.sequence > user_message.sequence,
+        )
+    )
+    await db.commit()
 
     return await _stream_chat_run(thread, user_message, pipeline_version, db)

@@ -51,24 +51,21 @@ async def get_project_knowledge_bases(
 ):
     await _verify_project_ownership(project_id, current_user.id, db)
 
-    stmt = select(KnowledgeBase).where(
-        KnowledgeBase.project_id == project_id,
-        KnowledgeBase.user_id == current_user.id,
+    stmt = (
+        select(KnowledgeBase, func.count(Document.id))
+        .outerjoin(Document, Document.knowledge_base_id == KnowledgeBase.id)
+        .where(
+            KnowledgeBase.project_id == project_id,
+            KnowledgeBase.user_id == current_user.id,
+        )
+        .group_by(KnowledgeBase.id)
     )
     result = await db.execute(stmt)
-    knowledge_bases = result.scalars().all()
 
-    # Enrich document count per KB
     enriched: List[KnowledgeBaseResponse] = []
-    for kb in knowledge_bases:
-        count_stmt = select(func.count(Document.id)).where(
-            Document.knowledge_base_id == kb.id
-        )
-        count_res = await db.execute(count_stmt)
-        doc_count = count_res.scalar_one() or 0
-
+    for kb, doc_count in result.all():
         kb_dto = KnowledgeBaseResponse.model_validate(kb)
-        kb_dto.document_count = doc_count
+        kb_dto.document_count = doc_count or 0
         enriched.append(kb_dto)
 
     return APIResponse(
@@ -208,13 +205,18 @@ async def update_knowledge_base(
         kb.chunking_config = payload.chunking_config.model_dump()
     if payload.embedding_config is not None:
         kb.embedding_config = payload.embedding_config.model_dump()
-    if payload.indexing_config is not None:
-        kb.indexing_config = payload.indexing_config.model_dump()
 
     await db.commit()
     await db.refresh(kb)
 
+    count_stmt = select(func.count(Document.id)).where(
+        Document.knowledge_base_id == kb.id
+    )
+    count_res = await db.execute(count_stmt)
+    doc_count = count_res.scalar_one() or 0
+
     response_dto = KnowledgeBaseResponse.model_validate(kb)
+    response_dto.document_count = doc_count
     return APIResponse(
         success=True,
         message="Knowledge base updated successfully",
@@ -268,6 +270,19 @@ async def get_knowledge_base_documents(
     db: AsyncSession = Depends(get_db),
 ):
     await _verify_project_ownership(project_id, current_user.id, db)
+
+    kb = await db.scalar(
+        select(KnowledgeBase.id).where(
+            KnowledgeBase.id == kb_id,
+            KnowledgeBase.project_id == project_id,
+            KnowledgeBase.user_id == current_user.id,
+        )
+    )
+    if not kb:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Knowledge base not found",
+        )
 
     stmt = select(Document).where(Document.knowledge_base_id == kb_id)
     result = await db.execute(stmt)

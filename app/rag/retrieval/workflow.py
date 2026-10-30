@@ -37,13 +37,17 @@ class RetrievalWorkflow:
             return list(unique.values())
         for model, knowledge_base_ids in by_model.items():
             from app.rag.embeddings import SentenceTransformerEmbedder
+            import asyncio
 
             embedder = SentenceTransformerEmbedder(model_name=model)
             filters = {"knowledge_base_id": knowledge_base_ids}
             # Gather candidates across ALL queries before selecting final results.
             all_dense = []
             all_sparse = []
-            for index, query in enumerate(queries, start=1):
+            
+            async def process_query(query):
+                res_dense = []
+                res_sparse = []
                 # 2. Dense retrieval
                 if strategy in {"dense", "hybrid", "mmr"}:
                     fetch_k = (
@@ -60,14 +64,13 @@ class RetrievalWorkflow:
                     )
 
                     if config.similarity_threshold is not None:
-                        before = len(dense_results)
                         dense_results = [
                             (doc, score)
                             for doc, score in dense_results
                             if score >= config.similarity_threshold
                         ]
  
-                    all_dense.extend(dense_results)
+                    res_dense.extend(dense_results)
                 # 3. Sparse retrieval
                 if strategy in {"sparse", "hybrid"}:
                     sparse_results = await retrieve_sparse(
@@ -77,7 +80,13 @@ class RetrievalWorkflow:
                         top_k=config.top_k,
                         filters=filters,
                     )
-                    all_sparse.extend(sparse_results)
+                    res_sparse.extend(sparse_results)
+                return res_dense, res_sparse
+
+            results = await asyncio.gather(*(process_query(q) for q in queries))
+            for res_dense, res_sparse in results:
+                all_dense.extend(res_dense)
+                all_sparse.extend(res_sparse)
             # 4. Deduplicate candidates across queries
             all_dense = deduplicate_scored(all_dense)
             all_sparse = deduplicate_scored(all_sparse)
@@ -114,7 +123,7 @@ class RetrievalWorkflow:
                 else:
                     # A single MMR pass over candidates from every query.
                     combined_query = " ".join(queries)
-                    query_embedding = embedder.embed_query(combined_query)
+                    query_embedding = await asyncio.to_thread(embedder.embed_query, combined_query)
                     selected = maximal_marginal_relevance(
                         query_embedding,
                         all_dense,

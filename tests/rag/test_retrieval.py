@@ -31,6 +31,21 @@ def test_weighted_fusion_uses_alpha_and_deduplicates():
     assert [document.id for document in results] == ["one", "two"]
 
 
+def test_weighted_fusion_preserves_order_with_negative_scores():
+    better = SimpleNamespace(id="better")
+    worse = SimpleNamespace(id="worse")
+
+    results = weighted_fusion(
+        [(better, -0.1), (worse, -0.8)],
+        [],
+        alpha=1.0,
+        top_k=2,
+    )
+
+    assert [document.id for document in results] == ["better", "worse"]
+    assert results[0].score > results[1].score
+
+
 def test_mmr_keeps_relevant_results_with_diversity():
     first = SimpleNamespace(id="one", embedding=[1.0, 0.0])
     duplicate = SimpleNamespace(id="duplicate", embedding=[1.0, 0.0])

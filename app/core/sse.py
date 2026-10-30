@@ -4,7 +4,9 @@ from typing import Any, AsyncGenerator, Dict, Optional
 from fastapi.responses import StreamingResponse
 import redis.asyncio as aioredis
 
-redis = aioredis.from_url("redis://localhost:6379")
+from app.core.config import settings
+
+redis = aioredis.from_url(f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}")
 
 class RedisEventPublisher:
     async def subscribe(self, channel: str = "ingestion_channel"):

@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 import shutil
 from typing import List
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path as PathParam, UploadFile, status
 from sqlalchemy import select
@@ -91,14 +91,22 @@ async def upload_multiple_files(
             processed_documents.append(existing_doc)
             continue
 
-        # Save to disk
+        # Save to disk under KB-scoped directory with UUID prefix to prevent traversal and collisions
         import anyio
-        file_path = UPLOAD_DIR / file.filename
+        safe_filename = Path(file.filename or "document").name
+        if not safe_filename or safe_filename in {".", ".."}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid filename",
+            )
+        kb_dir = UPLOAD_DIR / str(kb_id)
+        kb_dir.mkdir(parents=True, exist_ok=True)
+        file_path = kb_dir / f"{uuid4().hex}_{safe_filename}"
         await anyio.Path(file_path).write_bytes(await file.read())
 
         db_doc = Document(
             knowledge_base_id=kb_id,
-            name=file.filename,
+            name=safe_filename,
             mime_type=file.content_type,
             size_bytes=file_path.stat().st_size,
             storage_path=str(file_path),
@@ -123,6 +131,7 @@ async def upload_multiple_files(
             detail="Background worker queue is not available",
         )
 
+    user_channel = f"ingestion_channel:{current_user.id}"
     for doc in processed_documents:
         await publisher.publish(
             data={
@@ -133,6 +142,7 @@ async def upload_multiple_files(
                 "message": "Document queued for ingestion",
             },
             event="ingestion_status",
+            channel=user_channel,
         )
         await redis_pool.enqueue_job(
             "ingest_document",
@@ -177,8 +187,9 @@ async def delete_document(
         )
 
     if document.storage_path:
-        file_path = Path(document.storage_path)
-        if file_path.exists():
+        file_path = Path(document.storage_path).resolve()
+        upload_root = UPLOAD_DIR.resolve()
+        if file_path.is_relative_to(upload_root) and file_path.exists():
             try:
                 file_path.unlink()
             except OSError:

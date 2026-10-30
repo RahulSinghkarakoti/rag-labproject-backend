@@ -43,7 +43,7 @@ def build_rag_context(
     query_context = "\n".join(f"- {q}" for q in queries) or "- None"
 
     document_context = "\n\n".join(
-        f"[{idx}] {doc.content}"
+        f"[{doc.document.name if hasattr(doc, 'document') and doc.document else getattr(doc, 'name', idx)}] {doc.content}"
         for idx, doc in enumerate(documents, start=1)
         if doc.content
     ) or "None"
@@ -87,7 +87,7 @@ def build_generation_prompt(
     instructions = system_prompt or DEFAULT_SYSTEM_PROMPT
     if citation_enforced:
         instructions += (
-            " Strictly enforce citations: Every statement or claim based on retrieved context MUST include inline citations corresponding to document numbers (e.g. [1], [2])."
+            " Strictly enforce citations: Every statement or claim based on retrieved context MUST include inline citations corresponding to document names (e.g. [document_name.pdf], [other_document.txt])."
         )
     return f"{instructions}\n\nQuery: {query}\n\nContext: {context}"
 

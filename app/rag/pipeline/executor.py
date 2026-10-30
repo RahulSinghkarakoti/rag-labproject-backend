@@ -84,6 +84,74 @@ class PipelineStepExecutor:
             except Exception:
                 return str(result)
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def stream_step(
+        self,
+        step_name: str,
+        input_data: dict | None = None,
+        config: dict | None = None,
+    ):
+        """Context manager for streaming steps that yield tokens."""
+        logger.info(
+            "pipeline_step step=%s state=waiting run_id=%s provider=%s model=%s",
+            step_name,
+            self.context.run_id,
+            self.context.provider_name,
+            self.context.model_name,
+        )
+
+        import asyncio
+
+        step = None
+        if self.run_manager:
+            step = await self.run_manager.start_step(
+                step_name, input_data=input_data, config=config
+            )
+        start = time.monotonic()
+        
+        result_container = {"response": ""}
+        
+        try:
+            yield result_container
+            elapsed = time.monotonic() - start
+            logger.info(
+                "pipeline_step step=%s state=completed elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+            )
+            if self.run_manager and step:
+                await self.run_manager.complete_step(
+                    step,
+                    output_data={"response": result_container["response"]},
+                    metadata={"elapsed_seconds": round(elapsed, 4)},
+                )
+        except asyncio.CancelledError:
+            elapsed = time.monotonic() - start
+            logger.warning(
+                "pipeline_step step=%s state=cancelled elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+            )
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, "Request cancelled by user")
+            raise
+        except Exception as exc:
+            elapsed = time.monotonic() - start
+            logger.error(
+                "pipeline_step step=%s state=failed elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+                exc_info=True,
+            )
+            if self.run_manager and step:
+                await self.run_manager.fail_step(step, str(exc))
+            raise
+
     async def run(
         self,
         step_name: str,

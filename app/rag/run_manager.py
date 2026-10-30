@@ -256,6 +256,17 @@ class RunManager:
             self.current_retrieval_run_id,
             len(documents),
         )
+        existing_results = (
+            await self.db.scalars(
+                select(RetrievalResult).where(
+                    RetrievalResult.retrieval_run_id == self.current_retrieval_run_id
+                )
+            )
+        ).all()
+        results_by_chunk_id = {
+            res.chunk_id: res for res in existing_results if res.chunk_id is not None
+        }
+
         updated_count = 0
         unmatched_count = 0
         for rank, doc in enumerate(documents, start=1):
@@ -276,11 +287,7 @@ class RunManager:
                         raw_id,
                     )
                     continue
-                stmt = select(RetrievalResult).where(
-                    RetrievalResult.retrieval_run_id == self.current_retrieval_run_id,
-                    RetrievalResult.chunk_id == chunk_uuid,
-                )
-                res = await self.db.scalar(stmt)
+                res = results_by_chunk_id.get(chunk_uuid)
                 if res:
                     res.rerank_score = float(rerank_score)
                     res.metadata_ = {

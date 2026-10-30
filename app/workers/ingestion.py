@@ -28,10 +28,13 @@ async def ingest_document(ctx: dict, document_id: str):
                 f"Document {document_id} not found"
             )
 
+        user_channel = "ingestion_channel"
         try:
             kb = await db.scalar(select(KnowledgeBase).where(KnowledgeBase.id == document.knowledge_base_id))
             if kb is None:
                 raise ValueError(f"Knowledge base for document {document_id} not found")
+            if kb.user_id is not None:
+                user_channel = f"ingestion_channel:{kb.user_id}"
             # 2. Mark processing
             document.status = "processing"
             await db.commit()
@@ -43,6 +46,7 @@ async def ingest_document(ctx: dict, document_id: str):
                     "message": "Document ingestion started",
                 },
                 event="ingestion_status",
+                channel=user_channel,
             )
             # 3. Build RAG components
             loader = LoaderFactory()
@@ -70,6 +74,7 @@ async def ingest_document(ctx: dict, document_id: str):
                 enbedder=embedder,
                 vector_store=vector_store,
                 document_id=document_id,
+                sse_channel=user_channel,
                 metadata={
                     "filename": document.name,
                     "type": document.mime_type,
@@ -99,6 +104,7 @@ async def ingest_document(ctx: dict, document_id: str):
                     "message": "Document ingestion completed",
                 },
                 event="ingestion_status",
+                channel=user_channel,
             )
 
             return {
@@ -129,6 +135,7 @@ async def ingest_document(ctx: dict, document_id: str):
                         "message": "Document ingestion failed",
                     },
                     event="ingestion_status",
+                    channel=user_channel,
                 )
 
             raise

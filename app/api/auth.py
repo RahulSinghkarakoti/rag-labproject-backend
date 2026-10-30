@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -19,6 +20,7 @@ from app.schemas.auth import (
  
 
 from app.core.security import (
+    REFRESH_TOKEN_EXPIRE_DAYS,
     create_access_token,
     create_refresh_token,
     hash_refresh_token,
@@ -42,9 +44,9 @@ async def oauth_login(
             status_code=400,
             detail="Unsupported authentication provider",
         )
-    if (
-        request.headers.get("X-Internal-Auth")
-        != settings.NEXTAUTH_INTERNAL_SECRET
+    internal_auth = request.headers.get("X-Internal-Auth") or ""
+    if not settings.NEXTAUTH_INTERNAL_SECRET or not secrets.compare_digest(
+        internal_auth, settings.NEXTAUTH_INTERNAL_SECRET
     ):
         raise HTTPException(
             status_code=401,
@@ -105,7 +107,7 @@ async def oauth_login(
         token_hash=hash_refresh_token(refresh_token),
         expires_at=(
             datetime.now(timezone.utc)
-            + timedelta(days=30)
+            + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         ),
     )
     db.add(refresh_token_record)
@@ -184,7 +186,7 @@ async def refresh_access_token(
             new_refresh_token
         ),
         expires_at=(
-            now + timedelta(days=30)
+            now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         ),
     )
     db.add(new_refresh_record)

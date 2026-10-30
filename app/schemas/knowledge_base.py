@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.core.model_config import validate_embedding_model
 
 
@@ -9,6 +9,12 @@ class ChunkingConfig(BaseModel):
     strategy: Literal["recursive", "markdown", "semantic", "character"] = "recursive"
     chunk_size: int = Field(default=1000, ge=100, le=4000)
     chunk_overlap: int = Field(default=200, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def validate_overlap(self) -> "ChunkingConfig":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+        return self
 
 class EmbeddingConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"

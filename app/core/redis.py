@@ -1,13 +1,15 @@
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 
+from app.core.config import settings
+
 redis_pool: ArqRedis | None = None
 
 
 async def init_redis_pool(
     *,
-    host: str = "localhost",
-    port: int = 6379,
+    host: str = settings.REDIS_HOST,
+    port: int = settings.REDIS_PORT,
 ) -> ArqRedis:
     """Create the shared ARQ Redis pool used to enqueue background jobs."""
     global redis_pool
