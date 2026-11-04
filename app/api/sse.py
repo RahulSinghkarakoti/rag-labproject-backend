@@ -6,7 +6,7 @@ from app.api.dependencies import get_current_user
 from app.core.sse import create_sse_response, publisher
 from app.models.user import User
 
-router = APIRouter()
+router = APIRouter(prefix="/sse", tags=["SSE Stream"])
 
 
 @router.options("/stream")

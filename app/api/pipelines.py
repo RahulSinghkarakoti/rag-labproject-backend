@@ -12,7 +12,6 @@ from app.schemas.pipeline import PipelineResponse, PipelineRequest, PipelineVers
 
 
 router = APIRouter(
-    prefix="/api",
     tags=["Pipelines"],
 )
 

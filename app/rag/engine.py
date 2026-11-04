@@ -235,7 +235,8 @@ class QueryEngine:
             status="completed",
             metadata_={
                 "run_id": str(run.id),
-                "citations": citations
+                "citations": citations,
+                "created_at": now.isoformat(),
             },
         )
         self.db.add(assistant_message)

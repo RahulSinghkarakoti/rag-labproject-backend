@@ -28,7 +28,7 @@ from app.core.security import (
 from app.schemas.common import APIResponse
 
 router = APIRouter(
-    prefix="/api/auth",
+    prefix="/auth",
     tags=["Authentication"],
 )
 

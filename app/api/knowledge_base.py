@@ -20,7 +20,6 @@ from app.schemas.knowledge_base import (
 )
 
 router = APIRouter(
-    prefix="/api",
     tags=["Knowledge Bases"],
 )
 
@@ -259,10 +258,7 @@ async def delete_knowledge_base(
     )
 
 
-@router.get(
-    "/projects/{project_id}/knowledge-bases/{kb_id}/documents",
-    response_model=APIResponse[List[DocumentResponse]],
-)
+# Preserved for backward-compatibility with direct module imports (e.g., tests)
 async def get_knowledge_base_documents(
     project_id: UUID,
     kb_id: UUID,

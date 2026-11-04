@@ -15,7 +15,7 @@ from app.models.thread import Thread
 from app.schemas.common import APIResponse
 from app.schemas.run import RunDetailsResponse, RunStepResponse
 
-router = APIRouter(tags=["runs"])
+router = APIRouter(tags=["Runs"])
 
 
 async def _get_run_with_steps(run_id: UUID, user_id: UUID, db: AsyncSession) -> Run:
