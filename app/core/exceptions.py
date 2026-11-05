@@ -1,7 +1,6 @@
 from typing import Any
 
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
+from fastapi import status
 
 
 class AppException(Exception):
@@ -33,54 +32,6 @@ class AppException(Exception):
             self.code = code
 
         super().__init__(self.message)
-
-
-# ---------------------------------------------------------
-# Authentication / Authorization
-# ---------------------------------------------------------
-
-class InvalidTokenError(AppException):
-    status_code = status.HTTP_401_UNAUTHORIZED
-    code = "INVALID_TOKEN"
-    message = "Invalid or expired access token."
-
-
-class AuthenticationError(AppException):
-    status_code = status.HTTP_401_UNAUTHORIZED
-    code = "AUTHENTICATION_REQUIRED"
-    message = "Authentication is required."
-
-
-class PermissionDeniedError(AppException):
-    status_code = status.HTTP_403_FORBIDDEN
-    code = "PERMISSION_DENIED"
-    message = "You do not have permission to perform this action."
-
-
-# ---------------------------------------------------------
-# Resources
-# ---------------------------------------------------------
-
-class ResourceNotFoundError(AppException):
-    status_code = status.HTTP_404_NOT_FOUND
-    code = "RESOURCE_NOT_FOUND"
-    message = "The requested resource was not found."
-
-
-class ResourceAlreadyExistsError(AppException):
-    status_code = status.HTTP_409_CONFLICT
-    code = "RESOURCE_ALREADY_EXISTS"
-    message = "The resource already exists."
-
-
-# ---------------------------------------------------------
-# Validation
-# ---------------------------------------------------------
-
-class ValidationError(AppException):
-    status_code = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
-    code = "VALIDATION_ERROR"
-    message = "Validation failed."
 
 
 # ---------------------------------------------------------
@@ -201,25 +152,4 @@ def sanitize_model_error(exc: Exception, provider: str = "unknown", model: str =
         model=model,
         error_type="provider_error",
         status_code=status.HTTP_502_BAD_GATEWAY,
-    )
-
-
-# ---------------------------------------------------------
-# Generic application error
-# ---------------------------------------------------------
-
-async def app_exception_handler(
-    request: Request,
-    exc: AppException,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "message": exc.message,
-            "error": {
-                "code": exc.code,
-                "details": exc.details,
-            },
-        },
     )

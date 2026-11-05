@@ -1,14 +1,12 @@
+from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.api.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 from app.database.database import get_db
-from app.models import Message, Thread
-from app.models.project import Project
+from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.pipeline import PipelineVersionResponse
 from app.schemas.thread import (
@@ -23,25 +21,16 @@ from app.services.chat_service import ChatService
 router = APIRouter(tags=["Threads"])
 
 
-@router.get("/projects/{project_id}/threads")
+@router.get("/projects/{project_id}/threads", response_model=APIResponse[List[ThreadResponse]])
 async def get_project_threads(
     project_id: UUID,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not await db.scalar(
-        select(Project.id).where(Project.id == project_id, Project.user_id == current_user.id)
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-    threads = (
-        await db.scalars(
-            select(Thread)
-            .options(selectinload(Thread.knowledge_bases))
-            .where(Thread.project_id == project_id, Thread.user_id == current_user.id)
-            .order_by(Thread.updated_at.desc())
-        )
-    ).all()
+    service = ChatService(db)
+    threads = await service.get_project_threads(
+        project_id=project_id, user_id=current_user.id
+    )
     return APIResponse(
         success=True,
         message="Threads retrieved successfully",
@@ -53,7 +42,7 @@ async def get_project_threads(
 async def create_thread(
     project_id: UUID,
     thread_data: ThreadCreate,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
@@ -72,10 +61,10 @@ async def create_thread(
     )
 
 
-@router.get("/threads/{thread_id}")
+@router.get("/threads/{thread_id}", response_model=APIResponse[ThreadResponse])
 async def get_thread(
     thread_id: UUID,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
@@ -93,7 +82,7 @@ async def get_thread(
 )
 async def get_latest_thread_pipeline_version(
     thread_id: UUID,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
@@ -106,31 +95,22 @@ async def get_latest_thread_pipeline_version(
     )
 
 
-@router.patch("/threads/{thread_id}")
+@router.patch("/threads/{thread_id}", response_model=APIResponse[ThreadResponse])
 async def update_thread(
     thread_id: UUID,
     thread_data: ThreadUpdate,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
-    thread = await service.get_thread(thread_id, current_user.id)
-
-    if thread_data.title is not None:
-        thread.title = thread_data.title
-
-    if thread_data.knowledge_base_ids is not None:
-        _, kbs = await service.validate_knowledge_bases(
-            thread.project_id, current_user.id, thread_data.knowledge_base_ids
-        )
-        thread.knowledge_bases = kbs
-
-    incoming_config = thread_data.config.model_dump() if thread_data.config else None
-    if incoming_config is not None:
-        await service.sync_thread_pipeline_config(thread, incoming_config)
-
-    await db.commit()
-    await db.refresh(thread)
+    config = thread_data.config.model_dump() if thread_data.config else None
+    thread = await service.update_thread(
+        thread_id=thread_id,
+        user_id=current_user.id,
+        title=thread_data.title,
+        knowledge_base_ids=thread_data.knowledge_base_ids,
+        config=config,
+    )
     return APIResponse(
         success=True,
         message="Thread updated successfully",
@@ -138,40 +118,32 @@ async def update_thread(
     )
 
 
-@router.delete("/threads/{thread_id}")
+@router.delete("/threads/{thread_id}", response_model=APIResponse[None])
 async def delete_thread(
     thread_id: UUID,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
-    thread = await service.get_thread(thread_id, current_user.id)
-    await db.delete(thread)
-    await db.commit()
-    return APIResponse(success=True, message="Thread deleted successfully", data=None)
+    await service.delete_thread(thread_id=thread_id, user_id=current_user.id)
+    return APIResponse(
+        success=True, message="Thread deleted successfully", data=None
+    )
 
 
 @router.get(
     "/threads/{thread_id}/messages",
-    response_model=APIResponse[list[MessageResponse]],
+    response_model=APIResponse[List[MessageResponse]],
 )
 async def get_thread_messages(
     thread_id: UUID,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
-    await service.get_thread(thread_id, current_user.id)
-    messages = (
-        await db.scalars(
-            select(Message)
-            .where(Message.thread_id == thread_id)
-            .order_by(
-                Message.sequence.asc(),
-                Message.metadata_["created_at"].astext.asc().nulls_first(),
-            )
-        )
-    ).all()
+    messages = await service.get_thread_messages(
+        thread_id=thread_id, user_id=current_user.id
+    )
     return APIResponse(
         success=True,
         message="Thread messages retrieved successfully",
@@ -183,7 +155,7 @@ async def get_thread_messages(
 async def create_message(
     thread_id: UUID,
     message_data: MessageCreate,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
@@ -203,14 +175,18 @@ async def edit_message(
     thread_id: UUID,
     message_id: UUID,
     message_data: MessageCreate,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)
     thread = await service.get_thread(thread_id, current_user.id)
     pipeline_version = await service.get_latest_pipeline_version(thread)
-    target_message = await service.edit_message(thread, message_id, message_data.content)
-    return await service.stream_chat_run(thread, target_message, pipeline_version)
+    target_message = await service.edit_message(
+        thread, message_id, message_data.content
+    )
+    return await service.stream_chat_run(
+        thread, target_message, pipeline_version
+    )
 
 
 @router.post("/threads/{thread_id}/retry")
@@ -218,7 +194,7 @@ async def edit_message(
 async def retry_message(
     thread_id: UUID,
     message_id: UUID | None = None,
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     service = ChatService(db)

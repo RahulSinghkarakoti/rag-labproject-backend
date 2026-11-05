@@ -434,3 +434,81 @@ class ChatService:
                 raise
 
         return create_sse_response(event_generator())
+
+    async def get_project_threads(
+        self, project_id: UUID, user_id: int
+    ) -> List[Thread]:
+        """Fetch all threads for a project after verifying project ownership."""
+        if not await self.db.scalar(
+            select(Project.id).where(
+                Project.id == project_id, Project.user_id == user_id
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+
+        threads = (
+            await self.db.scalars(
+                select(Thread)
+                .options(selectinload(Thread.knowledge_bases))
+                .where(
+                    Thread.project_id == project_id,
+                    Thread.user_id == user_id,
+                )
+                .order_by(Thread.updated_at.desc())
+            )
+        ).all()
+        return list(threads)
+
+    async def update_thread(
+        self,
+        thread_id: UUID,
+        user_id: int,
+        title: str | None = None,
+        knowledge_base_ids: List[UUID] | None = None,
+        config: dict | None = None,
+    ) -> Thread:
+        """Update thread metadata, associated knowledge bases, and pipeline config."""
+        thread = await self.get_thread(thread_id, user_id)
+
+        if title is not None:
+            thread.title = title
+
+        if knowledge_base_ids is not None:
+            _, kbs = await self.validate_knowledge_bases(
+                thread.project_id, user_id, knowledge_base_ids
+            )
+            thread.knowledge_bases = kbs
+
+        if config is not None:
+            await self.sync_thread_pipeline_config(thread, config)
+
+        await self.db.commit()
+        await self.db.refresh(thread)
+        return thread
+
+    async def delete_thread(self, thread_id: UUID, user_id: int) -> None:
+        """Delete thread after verifying user ownership."""
+        thread = await self.get_thread(thread_id, user_id)
+        await self.db.delete(thread)
+        await self.db.commit()
+
+    async def get_thread_messages(
+        self, thread_id: UUID, user_id: int
+    ) -> List[Message]:
+        """Fetch all messages for a thread ordered by sequence and creation."""
+        await self.get_thread(thread_id, user_id)
+        messages = (
+            await self.db.scalars(
+                select(Message)
+                .where(Message.thread_id == thread_id)
+                .order_by(
+                    Message.sequence.asc(),
+                    Message.metadata_["created_at"].astext.asc().nulls_first(),
+                )
+            )
+        ).all()
+        return list(messages)
+

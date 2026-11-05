@@ -1,15 +1,11 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 from app.database.database import get_db
-from app.models.document import Document
-from app.models.knowledge_base import KnowledgeBase
-from app.models.project import Project
 from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.document import DocumentResponse
@@ -18,29 +14,15 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
 )
+from app.services.knowledge_base_service import KnowledgeBaseService
 
 router = APIRouter(
     tags=["Knowledge Bases"],
 )
 
 
-async def _verify_project_ownership(
-    project_id: UUID, user_id: int, db: AsyncSession
-) -> Project:
-    stmt = select(Project).where(
-        Project.id == project_id, Project.user_id == user_id
-    )
-    result = await db.execute(stmt)
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-    return project
-
-
-@router.get("/projects/{project_id}/knowledge-bases",
+@router.get(
+    "/projects/{project_id}/knowledge-bases",
     response_model=APIResponse[List[KnowledgeBaseResponse]],
 )
 async def get_project_knowledge_bases(
@@ -48,25 +30,10 @@ async def get_project_knowledge_bases(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    stmt = (
-        select(KnowledgeBase, func.count(Document.id))
-        .outerjoin(Document, Document.knowledge_base_id == KnowledgeBase.id)
-        .where(
-            KnowledgeBase.project_id == project_id,
-            KnowledgeBase.user_id == current_user.id,
-        )
-        .group_by(KnowledgeBase.id)
+    service = KnowledgeBaseService(db)
+    enriched = await service.get_project_knowledge_bases(
+        project_id=project_id, user_id=current_user.id
     )
-    result = await db.execute(stmt)
-
-    enriched: List[KnowledgeBaseResponse] = []
-    for kb, doc_count in result.all():
-        kb_dto = KnowledgeBaseResponse.model_validate(kb)
-        kb_dto.document_count = doc_count or 0
-        enriched.append(kb_dto)
-
     return APIResponse(
         success=True,
         message="Knowledge bases retrieved successfully",
@@ -85,43 +52,10 @@ async def create_knowledge_base(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    chunking_dict = (
-        payload.chunking_config.model_dump()
-        if payload.chunking_config
-        else {
-            "strategy": "recursive",
-            "chunk_size": 1000,
-            "chunk_overlap": 200,
-            "embedding_model": "all-MiniLM-L6-v2",
-        }
+    service = KnowledgeBaseService(db)
+    response_dto = await service.create_knowledge_base(
+        project_id=project_id, user_id=current_user.id, payload=payload
     )
-    embedding_dict = (
-        payload.embedding_config.model_dump()
-        if payload.embedding_config
-        else {
-            "model": "all-MiniLM-L6-v2",
-            # "dimension": 384,
-        }
-    ) 
-
-    new_kb = KnowledgeBase(
-        project_id=project_id,
-        user_id=current_user.id,
-        name=payload.name,
-        description=payload.description,
-        chunking_config=chunking_dict,
-        embedding_config=embedding_dict,
-        indexing_config={},
-        metadata_={},
-    )
-    db.add(new_kb)
-    await db.commit()
-    await db.refresh(new_kb)
-
-    response_dto = KnowledgeBaseResponse.model_validate(new_kb)
-    response_dto.document_count = 0
     return APIResponse(
         success=True,
         message="Knowledge base created successfully",
@@ -139,30 +73,10 @@ async def get_knowledge_base(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    stmt = select(KnowledgeBase).where(
-        KnowledgeBase.id == kb_id,
-        KnowledgeBase.project_id == project_id,
-        KnowledgeBase.user_id == current_user.id,
+    service = KnowledgeBaseService(db)
+    response_dto = await service.get_knowledge_base(
+        project_id=project_id, kb_id=kb_id, user_id=current_user.id
     )
-    result = await db.execute(stmt)
-    kb = result.scalar_one_or_none()
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Knowledge base not found",
-        )
-
-    count_stmt = select(func.count(Document.id)).where(
-        Document.knowledge_base_id == kb.id
-    )
-    count_res = await db.execute(count_stmt)
-    doc_count = count_res.scalar_one() or 0
-
-    response_dto = KnowledgeBaseResponse.model_validate(kb)
-    response_dto.document_count = doc_count
-
     return APIResponse(
         success=True,
         message="Knowledge base retrieved successfully",
@@ -181,41 +95,13 @@ async def update_knowledge_base(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    stmt = select(KnowledgeBase).where(
-        KnowledgeBase.id == kb_id,
-        KnowledgeBase.project_id == project_id,
-        KnowledgeBase.user_id == current_user.id,
+    service = KnowledgeBaseService(db)
+    response_dto = await service.update_knowledge_base(
+        project_id=project_id,
+        kb_id=kb_id,
+        payload=payload,
+        user_id=current_user.id,
     )
-    result = await db.execute(stmt)
-    kb = result.scalar_one_or_none()
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Knowledge base not found",
-        )
-
-    if payload.name is not None:
-        kb.name = payload.name
-    if payload.description is not None:
-        kb.description = payload.description
-    if payload.chunking_config is not None:
-        kb.chunking_config = payload.chunking_config.model_dump()
-    if payload.embedding_config is not None:
-        kb.embedding_config = payload.embedding_config.model_dump()
-
-    await db.commit()
-    await db.refresh(kb)
-
-    count_stmt = select(func.count(Document.id)).where(
-        Document.knowledge_base_id == kb.id
-    )
-    count_res = await db.execute(count_stmt)
-    doc_count = count_res.scalar_one() or 0
-
-    response_dto = KnowledgeBaseResponse.model_validate(kb)
-    response_dto.document_count = doc_count
     return APIResponse(
         success=True,
         message="Knowledge base updated successfully",
@@ -233,24 +119,10 @@ async def delete_knowledge_base(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    stmt = select(KnowledgeBase).where(
-        KnowledgeBase.id == kb_id,
-        KnowledgeBase.project_id == project_id,
-        KnowledgeBase.user_id == current_user.id,
+    service = KnowledgeBaseService(db)
+    await service.delete_knowledge_base(
+        project_id=project_id, kb_id=kb_id, user_id=current_user.id
     )
-    result = await db.execute(stmt)
-    kb = result.scalar_one_or_none()
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Knowledge base not found",
-        )
-
-    await db.delete(kb)
-    await db.commit()
-
     return APIResponse(
         success=True,
         message="Knowledge base deleted successfully",
@@ -265,25 +137,10 @@ async def get_knowledge_base_documents(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _verify_project_ownership(project_id, current_user.id, db)
-
-    kb = await db.scalar(
-        select(KnowledgeBase.id).where(
-            KnowledgeBase.id == kb_id,
-            KnowledgeBase.project_id == project_id,
-            KnowledgeBase.user_id == current_user.id,
-        )
+    service = KnowledgeBaseService(db)
+    documents = await service.get_knowledge_base_documents(
+        project_id=project_id, kb_id=kb_id, user_id=current_user.id
     )
-    if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Knowledge base not found",
-        )
-
-    stmt = select(Document).where(Document.knowledge_base_id == kb_id)
-    result = await db.execute(stmt)
-    documents = result.scalars().all()
-
     return APIResponse(
         success=True,
         message="Documents retrieved successfully",

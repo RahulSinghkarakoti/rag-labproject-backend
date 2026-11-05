@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 from app.core.sse import create_sse_response, publisher
 from app.models.user import User
 

@@ -1,31 +1,18 @@
-import secrets
-import uuid
-from datetime import datetime, timedelta, timezone
-
-from fastapi import APIRouter, Depends, HTTPException,Request
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import settings
-from app.api.dependencies import get_current_user
+
+from app.core.dependencies import get_current_user
 from app.database.database import get_db
 from app.models.user import User
-from app.models.auth import OAuthAccount, RefreshToken
 from app.schemas.auth import (
     AuthResponse,
+    LogoutRequest,
     OAuthLoginRequest,
     RefreshRequest,
-    LogoutRequest,
     UserResponse,
 )
- 
-
-from app.core.security import (
-    REFRESH_TOKEN_EXPIRE_DAYS,
-    create_access_token,
-    create_refresh_token,
-    hash_refresh_token,
-)
 from app.schemas.common import APIResponse
+from app.services.auth_service import AuthService
 
 router = APIRouter(
     prefix="/auth",
@@ -39,87 +26,22 @@ async def oauth_login(
     data: OAuthLoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    if data.provider not in {"google", "github"}:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported authentication provider",
-        )
-    internal_auth = request.headers.get("X-Internal-Auth") or ""
-    if not settings.NEXTAUTH_INTERNAL_SECRET or not secrets.compare_digest(
-        internal_auth, settings.NEXTAUTH_INTERNAL_SECRET
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized",
-        )
-    # 1. Find existing OAuth account
-    result = await db.execute(
-        select(OAuthAccount).where(
-            OAuthAccount.provider == data.provider,
-            OAuthAccount.provider_user_id == data.provider_user_id,
-        )
+    internal_auth = request.headers.get("X-Internal-Auth") if hasattr(request, "headers") else None
+    client = getattr(request, "client", None)
+    ip_address = client.host if client else None
+    user_agent = request.headers.get("user-agent") if hasattr(request, "headers") else None
+
+    service = AuthService(db)
+    auth_data = await service.oauth_login(
+        data=data,
+        internal_auth=internal_auth,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
-    oauth_account = result.scalar_one_or_none()
-    # 2. Existing OAuth account
-    if oauth_account:
-        result = await db.execute(
-            select(User).where(
-                User.id == oauth_account.user_id
-            )
-        )
-        user = result.scalar_one_or_none()
-    else:
-        # 3. Check whether email already exists
-        result = await db.execute(
-            select(User).where(
-                User.email == data.email
-            )
-        )
-        user = result.scalar_one_or_none()
-        if user:
-            raise HTTPException(
-                status_code=400,
-                detail="An account with this email already exists. Please log in with your original provider.",
-            )
-        
-        # 4. Create user if necessary
-        user = User(
-            email=data.email,
-            name=data.name,
-            avatar_url=data.avatar_url,
-            is_active=True,
-            is_verified=True,
-        )
-        db.add(user)
-        await db.flush()
-        # 5. Create provider connection
-        oauth_account = OAuthAccount(
-            user_id=user.id,
-            provider=data.provider,
-            provider_user_id=data.provider_user_id,
-        )
-        db.add(oauth_account)
-    # 6. Generate tokens
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token()
-    refresh_token_record = RefreshToken(
-        user_id=user.id,
-        token_hash=hash_refresh_token(refresh_token),
-        expires_at=(
-            datetime.now(timezone.utc)
-            + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-        ),
-    )
-    db.add(refresh_token_record)
-    await db.commit()
-    await db.refresh(user)
     return APIResponse(
-        message="Login Successfull.",
-        data=AuthResponse(
-        user=user,
-        access_token=access_token,
-        refresh_token=refresh_token,
-    ))
+        message="Login successful.",
+        data=auth_data,
+    )
 
 
 @router.get("/me", response_model=APIResponse[UserResponse])
@@ -128,99 +50,49 @@ async def get_me(
 ):
     return APIResponse(
         message="User details retrieved.",
-        data=current_user
+        data=current_user,
     )
-
 
 
 @router.post("/refresh", response_model=APIResponse[AuthResponse])
 async def refresh_access_token(
+    request: Request,
     data: RefreshRequest,
     db: AsyncSession = Depends(get_db),
-): 
-    token_hash = hash_refresh_token(
-        data.refresh_token
+):
+    client = getattr(request, "client", None)
+    ip_address = client.host if client else None
+    user_agent = request.headers.get("user-agent") if hasattr(request, "headers") else None
+
+    service = AuthService(db)
+    auth_data = await service.refresh_access_token(
+        data.refresh_token,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
-    result = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.token_hash == token_hash
-        )
-    )
-    stored_token = result.scalar_one_or_none()
-    if not stored_token:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid refresh token",
-        )
-    now = datetime.now(timezone.utc)
-    if stored_token.revoked_at is not None:
-        raise HTTPException(
-            status_code=401,
-            detail="Refresh token has been revoked",
-        )
-    if stored_token.expires_at <= now:
-        raise HTTPException(
-            status_code=401,
-            detail="Refresh token has expired",
-        )
-    result = await db.execute(
-        select(User).where(
-            User.id == stored_token.user_id,
-            User.is_active.is_(True),
-        )
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="User not found",
-        )
-    # Revoke old refresh token
-    stored_token.revoked_at = now
-    # Create new tokens
-    access_token = create_access_token(user.id)
-    new_refresh_token = create_refresh_token()
-    new_refresh_record = RefreshToken(
-        user_id=user.id,
-        token_hash=hash_refresh_token(
-            new_refresh_token
-        ),
-        expires_at=(
-            now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-        ),
-    )
-    db.add(new_refresh_record)
-    await db.commit()
     return APIResponse(
         message="Access token refreshed.",
-        data=AuthResponse(
-            user=user,
-            access_token=access_token,
-            refresh_token=new_refresh_token,
-        )
+        data=auth_data,
     )
 
 
-@router.post("/logout",response_model=APIResponse[dict])
+@router.post("/logout", response_model=APIResponse[dict])
 async def logout(
+    request: Request,
     data: LogoutRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    token_hash = hash_refresh_token(
-        data.refresh_token
+    client = getattr(request, "client", None)
+    ip_address = client.host if client else None
+    user_agent = request.headers.get("user-agent") if hasattr(request, "headers") else None
+
+    service = AuthService(db)
+    await service.logout(
+        data.refresh_token,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
-    result = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.token_hash == token_hash
-        )
-    )
-    stored_token = result.scalar_one_or_none()
-    if stored_token:
-        stored_token.revoked_at = datetime.now(
-            timezone.utc
-        )
-        await db.commit()
     return APIResponse(
         message="Logged out successfully",
-        data={}
+        data={},
     )
