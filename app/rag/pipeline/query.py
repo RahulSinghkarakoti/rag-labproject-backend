@@ -42,6 +42,7 @@ from app.rag.reranking import rerank_documents
 from app.rag.retrieval.workflow import RetrievalWorkflow
 from app.rag.vectorstore import PgVectorStore
 from app.schemas.thread import ThreadConfig
+from app.core.cancellation import cancellation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,12 @@ class QueryPipeline:
             response = await self._generate(self.message.content, state.context)
         return self._build_result(state, response)
 
+    def _check_cancellation(self) -> None:
+        if self.run and hasattr(self.run, "id"):
+            if cancellation_manager.is_cancelled(self.run.id):
+                logger.info("[QueryPipeline] Run %s is cancelled, halting execution", self.run.id)
+                raise asyncio.CancelledError(f"Run {self.run.id} cancelled by user")
+
     async def execute_stream(self):
         """
         Executes the RAG pipeline in streaming mode.
@@ -150,7 +157,9 @@ class QueryPipeline:
         Yields ``{"type": "token", "content": chunk}`` events during generation,
         followed by a final ``{"type": "complete", "result": {...}}`` event.
         """
+        self._check_cancellation()
         state = await self._prepare()
+        self._check_cancellation()
         if state.is_greeting:
             response = state.greeting_response
             yield {"type": "token", "content": response}
@@ -162,8 +171,10 @@ class QueryPipeline:
 
         response_parts: list[str] = []
         async for chunk in self._generate_stream(self.message.content, state.context):
+            self._check_cancellation()
             response_parts.append(chunk)
             yield {"type": "token", "content": chunk}
+        self._check_cancellation()
         yield {
             "type": "complete",
             "result": self._build_result(state, "".join(response_parts)),
@@ -182,6 +193,7 @@ class QueryPipeline:
         so that timing and structured logs are emitted automatically.
         """
         self._log_stage("prepare", "waiting")
+        self._check_cancellation()
 
         # Fast path: greeting check to skip expensive LLM/vector search pipeline
 
@@ -193,6 +205,7 @@ class QueryPipeline:
                 before_sequence=self.message.sequence,
             ),
         )
+        self._check_cancellation()
 
         # 2. Query Transformation — expand / rewrite / hyde / passthrough
         transformed_queries: list[str] = await self.executor.run(
@@ -201,6 +214,7 @@ class QueryPipeline:
             input_data={"query": self.message.content, "memory_length": len(memory)},
             config=self.thread_config.query_transformation.model_dump(),
         )
+        self._check_cancellation()
 
         # 3. Retrieval — dense / sparse / hybrid / mmr across knowledge bases
         retrieved_documents = await self.executor.run(
@@ -209,6 +223,7 @@ class QueryPipeline:
             input_data={"queries": transformed_queries},
             config=self.thread_config.retrieval.model_dump(),
         )
+        self._check_cancellation()
 
         # 4. Reranking — cross-encoder reranking (skipped when disabled)
         reranked_documents = await self.executor.run(
@@ -217,6 +232,7 @@ class QueryPipeline:
             input_data={"queries": transformed_queries, "document_count": len(retrieved_documents)},
             config=self.thread_config.reranking.model_dump() if self.thread_config.reranking.enabled else None,
         )
+        self._check_cancellation()
 
         # 5. Context assembly — build the prompt context block
         context = build_rag_context(transformed_queries, reranked_documents, memory)

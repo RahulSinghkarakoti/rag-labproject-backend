@@ -22,7 +22,7 @@ async def stream_events(
     channel = f"ingestion_channel:{current_user.id}"
 
     async def event_generator():
-        async for event in publisher.subscribe(channel=channel):
+        async for event in publisher.subscribe(channel=channel, request=request):
             yield event
 
     return create_sse_response(event_generator())

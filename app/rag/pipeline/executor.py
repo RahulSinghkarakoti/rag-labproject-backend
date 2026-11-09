@@ -137,7 +137,10 @@ class PipelineStepExecutor:
                 self.context.run_id,
             )
             if self.run_manager and step:
-                await self.run_manager.fail_step(step, "Request cancelled by user")
+                if hasattr(self.run_manager, "cancel_step"):
+                    await self.run_manager.cancel_step(step, "Request cancelled by user")
+                else:
+                    await self.run_manager.fail_step(step, "Request cancelled by user")
             raise
         except Exception as exc:
             elapsed = time.monotonic() - start
@@ -235,7 +238,10 @@ class PipelineStepExecutor:
                 self.context.run_id,
             )
             if self.run_manager and step:
-                await self.run_manager.fail_step(step, "Request cancelled by user")
+                if hasattr(self.run_manager, "cancel_step"):
+                    await self.run_manager.cancel_step(step, "Request cancelled by user")
+                else:
+                    await self.run_manager.fail_step(step, "Request cancelled by user")
             raise
         except Exception as exc:
             elapsed = time.monotonic() - start

@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     REDIS_PORT:int
     
     HF_TOKEN:str
+
+    # Model Preloading Configuration
+    PRELOAD_ALL_MODELS: bool = False
+    PRELOAD_EMBEDDING_MODELS: str = "none"
+    PRELOAD_RERANKING_MODELS: str = "none"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

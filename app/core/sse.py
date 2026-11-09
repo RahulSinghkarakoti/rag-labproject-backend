@@ -9,16 +9,25 @@ from app.core.config import settings
 redis = aioredis.from_url(f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}")
 
 class RedisEventPublisher:
-    async def subscribe(self, channel: str = "ingestion_channel"):
+    async def subscribe(self, channel: str = "ingestion_channel", request: Any = None):
         pubsub = redis.pubsub()
         await pubsub.subscribe(channel)
         try:
-            async for message in pubsub.listen():
-                if message["type"] == "message":
+            while True:
+                if request and await request.is_disconnected():
+                    break
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=10.0)
+                if message and message["type"] == "message":
                     payload = json.loads(message["data"].decode("utf-8"))
                     yield payload
+                else:
+                    yield ": keepalive\n\n"
         finally:
-            await pubsub.unsubscribe(channel)
+            try:
+                await pubsub.unsubscribe(channel)
+                await pubsub.close()
+            except Exception:
+                pass
 
     async def publish(self, data: dict, event: str = "ingestion_status", channel: str = "ingestion_channel"):
         payload = {"event": event, "data": json.dumps(data)}
@@ -30,7 +39,9 @@ def create_sse_response(generator: AsyncGenerator) -> StreamingResponse:
     """Helper wrapper for creating a push-based SSE response."""
     async def format_sse():
         async for item in generator:
-            if isinstance(item, dict):
+            if isinstance(item, str) and item.startswith(":"):
+                yield item
+            elif isinstance(item, dict):
                 event = item.get("event", "message")
                 data = item.get("data", "")
                 if not isinstance(data, str):

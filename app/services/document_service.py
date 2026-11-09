@@ -74,7 +74,15 @@ class DocumentService:
         """
         await self.verify_kb_ownership(project_id, kb_id, current_user.id)
 
+        redis_pool = get_redis_pool()
+        if redis_pool is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Background worker queue is not available",
+            )
+
         processed_documents: List[Document] = []
+        new_documents: List[Document] = []
 
         for file in files:
             checksum = await self.calculate_checksum(file)
@@ -116,20 +124,14 @@ class DocumentService:
             self.db.add(db_doc)
             await self.db.flush()
             processed_documents.append(db_doc)
+            new_documents.append(db_doc)
 
         await self.db.commit()
-        for doc in processed_documents:
+        for doc in new_documents:
             await self.db.refresh(doc)
 
-        redis_pool = get_redis_pool()
-        if redis_pool is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Background worker queue is not available",
-            )
-
         user_channel = f"ingestion_channel:{current_user.id}"
-        for doc in processed_documents:
+        for doc in new_documents:
             await publisher.publish(
                 data={
                     "document_id": str(doc.id),

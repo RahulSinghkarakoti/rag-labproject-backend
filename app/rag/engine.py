@@ -1,6 +1,7 @@
-from typing import Any
 import asyncio
+import logging
 from datetime import datetime, timezone
+from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, sanitize_model_error
@@ -11,6 +12,8 @@ from app.models.thread import Thread
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.generation.factory import ProviderModelFactory, provider_model_factory
 from app.rag.pipeline.query import QueryPipeline
+
+logger = logging.getLogger(__name__)
 
 
 class QueryEngine:
@@ -132,9 +135,13 @@ class QueryEngine:
                     continue
 
                 result = event["result"]
+                from app.core.cancellation import cancellation_manager
+                if cancellation_manager.is_cancelled(run.id) or run.status == "cancelled":
+                    raise asyncio.CancelledError(f"Run {run.id} was cancelled before completion")
+
                 await self._persist_run_result(
-                run=run,
-                message=message,
+                    run=run,
+                    message=message,
                     result=result,
                     config=config,
                     provider=provider,
@@ -151,39 +158,11 @@ class QueryEngine:
         except (asyncio.CancelledError, GeneratorExit, RuntimeError) as exc:
             if isinstance(exc, RuntimeError) and "CancelledError" not in str(exc):
                 raise exc
-            
-            from app.database.database import AsyncSessionLocal
-            import asyncio
-            
-            async def _mark_cancelled(r_id, m_id, thread_id, seq, p_text):
-                try:
-                    async with AsyncSessionLocal() as session:
-                        from app.models.run import Run
-                        from app.models.message import Message
-                        c_run = await session.get(Run, r_id)
-                        if not c_run: return
-                        c_run.status = "cancelled"
-                        c_run.completed_at = datetime.now(timezone.utc)
-                        c_run.error = {"code": "CANCELLED", "message": "User stopped generation."}
-                        c_msg = Message(
-                            thread_id=thread_id,
-                            parent_message_id=m_id,
-                            role="assistant",
-                            content=f"{p_text}\n\n[Generation stopped by user]" if p_text else "[Stopped by user]",
-                            sequence=(seq or 0) + 1,
-                            status="cancelled",
-                            metadata_={"run_id": str(r_id)},
-                        )
-                        session.add(c_msg)
-                        await session.flush()
-                        c_run.output_message_id = c_msg.id
-                        await session.commit()
-                except Exception:
-                    pass
 
             p_text = "".join(accumulated_tokens).strip()
-            asyncio.create_task(_mark_cancelled(run.id, message.id, message.thread_id, message.sequence, p_text))
-            raise
+            setattr(run, "_partial_text", p_text)
+            logger.info("[QueryEngine] Stream cancelled for run %s (accumulated %d chars)", run.id, len(p_text))
+            raise asyncio.CancelledError(f"Run {run.id} cancelled") from exc
 
         except Exception as exc:
             safe_exc = (
@@ -216,6 +195,11 @@ class QueryEngine:
         provider: BaseGenerationProvider,
     ) -> None:
         """Persist the assistant message and the durable stages of a run."""
+        from app.core.cancellation import cancellation_manager
+        if cancellation_manager.is_cancelled(run.id) or run.status == "cancelled":
+            logger.info("[QueryEngine] Skipping persistence for cancelled run %s", run.id)
+            return
+
         now = datetime.now(timezone.utc)
         docs = result.get("reranked_documents", []) or result.get("retrieved_documents", [])
         citations = []

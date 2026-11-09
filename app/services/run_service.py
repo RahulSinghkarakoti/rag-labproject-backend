@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.cancellation import cancellation_manager
 from app.models.message import Message
 from app.models.project import Project
 from app.models.run import Run, RunStep
@@ -89,6 +90,7 @@ class RunService:
         return run
 
     async def cancel_run(self, run_id: UUID, user_id: int) -> Run:
+        await cancellation_manager.cancel(run_id)
         run = await self.get_run_with_steps(run_id, user_id)
         if run.status in ["completed", "failed", "cancelled"]:
             return run

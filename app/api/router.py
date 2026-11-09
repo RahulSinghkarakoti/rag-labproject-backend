@@ -28,8 +28,8 @@ def register_routers(app: FastAPI) -> None:
     Mounts:
       - Health checks at root (/, /health, /db-check)
       - Standard versioned API at /api/v1
-      - Backward-compatible unversioned API at /api
     """
     app.include_router(health_router)
     app.include_router(api_router, prefix="/api/v1")
-    app.include_router(api_router, prefix="/api")
+    # Backward-compatible unversioned API (commented out as frontend now uses /api/v1):
+    # app.include_router(api_router, prefix="/api")

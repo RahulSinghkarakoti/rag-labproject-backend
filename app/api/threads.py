@@ -1,7 +1,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -155,6 +155,7 @@ async def get_thread_messages(
 async def create_message(
     thread_id: UUID,
     message_data: MessageCreate,
+    request: Request = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -166,7 +167,7 @@ async def create_message(
         content=message_data.content,
         target_message_id=message_data.message_id,
     )
-    return await service.stream_chat_run(thread, user_message, pipeline_version)
+    return await service.stream_chat_run(thread, user_message, pipeline_version, request=request)
 
 
 @router.put("/threads/{thread_id}/messages/{message_id}")
@@ -175,6 +176,7 @@ async def edit_message(
     thread_id: UUID,
     message_id: UUID,
     message_data: MessageCreate,
+    request: Request = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -185,7 +187,7 @@ async def edit_message(
         thread, message_id, message_data.content
     )
     return await service.stream_chat_run(
-        thread, target_message, pipeline_version
+        thread, target_message, pipeline_version, request=request
     )
 
 
@@ -194,6 +196,7 @@ async def edit_message(
 async def retry_message(
     thread_id: UUID,
     message_id: UUID | None = None,
+    request: Request = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -201,4 +204,4 @@ async def retry_message(
     thread = await service.get_thread(thread_id, current_user.id)
     pipeline_version = await service.get_latest_pipeline_version(thread)
     user_message = await service.resolve_retry_message(thread, message_id)
-    return await service.stream_chat_run(thread, user_message, pipeline_version)
+    return await service.stream_chat_run(thread, user_message, pipeline_version, request=request)

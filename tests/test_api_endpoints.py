@@ -128,7 +128,7 @@ async def test_get_document_not_found():
     assert exc_info.value.detail == "Document not found"
 
 
-def test_dual_mount_route_parity():
+def test_v1_mount_routes():
     from fastapi import FastAPI
     from app.api.router import register_routers
 
@@ -140,10 +140,6 @@ def test_dual_mount_route_parity():
     api_paths = {p for p in paths if p.startswith("/api/") and not p.startswith("/api/v1/")}
     v1_paths = {p for p in paths if p.startswith("/api/v1/")}
 
-    assert len(api_paths) > 0, "No /api routes found"
-    assert len(api_paths) == len(v1_paths), f"Route count mismatch: {len(api_paths)} vs {len(v1_paths)}"
-
-    for p in api_paths:
-        v1_equivalent = f"/api/v1{p[4:]}"
-        assert v1_equivalent in v1_paths, f"Missing {v1_equivalent} for {p}"
+    assert len(v1_paths) > 0, "No /api/v1 routes found"
+    assert len(api_paths) == 0, f"Found unversioned /api routes that should be disabled: {api_paths}"
 

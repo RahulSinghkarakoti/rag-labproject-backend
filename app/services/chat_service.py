@@ -1,15 +1,19 @@
 import asyncio
 from datetime import datetime, timezone
 import json
+import logging
 from typing import List, Tuple
 from uuid import UUID
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.cancellation import cancellation_manager
 from app.core.sse import create_sse_response
+
+logger = logging.getLogger(__name__)
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
@@ -395,6 +399,7 @@ class ChatService:
         thread: Thread,
         user_message: Message,
         pipeline_version: PipelineVersion,
+        request: Request | None = None,
     ):
         """Execute a streaming query run via QueryEngine and RunManager, returning an SSE response."""
         run_manager = RunManager(self.db)
@@ -405,9 +410,24 @@ class ChatService:
             run_type="chat",
         )
 
+        cancellation_manager.register(run.id)
         engine = QueryEngine(self.db, run_manager=run_manager)
 
         async def event_generator():
+            disconnect_task = None
+            if request:
+                async def _monitor_disconnect():
+                    try:
+                        while True:
+                            if await request.is_disconnected():
+                                logger.info("[stream_chat_run] Client disconnected for run %s", run.id)
+                                await cancellation_manager.cancel(run.id)
+                                break
+                            await asyncio.sleep(0.5)
+                    except asyncio.CancelledError:
+                        pass
+                disconnect_task = asyncio.create_task(_monitor_disconnect())
+
             try:
                 yield {
                     "event": "started",
@@ -421,17 +441,59 @@ class ChatService:
                 ):
                     yield {"event": event["type"], "data": json.dumps(event)}
 
-                if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
+                if not cancellation_manager.is_cancelled(run.id) and run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
                     await run_manager.complete_run()
             except asyncio.CancelledError:
-                # Handle client disconnection
-                if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
-                    await run_manager.cancel_run()
+                logger.info("[stream_chat_run] Handling cancellation for run %s", run.id)
+                # Shield cancellation cleanup so database records are reliably persisted
+                async def _cleanup_cancellation():
+                    from app.database.database import AsyncSessionLocal
+                    p_text = getattr(run, "_partial_text", "").strip()
+                    async with AsyncSessionLocal() as session:
+                        from app.models.run import Run as RunModel
+                        from app.models.message import Message as MessageModel
+                        c_run = await session.get(RunModel, run.id)
+                        if c_run and c_run.status != "completed":
+                            c_run.status = "cancelled"
+                            c_run.completed_at = datetime.now(timezone.utc)
+                            c_run.error = {"code": "CANCELLED", "message": "User stopped generation."}
+                            content = f"{p_text}\n\n[Generation stopped by user]" if p_text else "[Generation stopped by user]"
+                            c_msg = MessageModel(
+                                thread_id=thread.id,
+                                parent_message_id=user_message.id,
+                                role="assistant",
+                                content=content,
+                                sequence=(user_message.sequence or 0) + 1,
+                                status="cancelled",
+                                metadata_={"run_id": str(run.id)},
+                            )
+                            session.add(c_msg)
+                            await session.flush()
+                            c_run.output_message_id = c_msg.id
+                            await session.commit()
+                            return c_run, c_msg
+                    return None, None
+
+                _, c_msg = await asyncio.shield(_cleanup_cancellation())
+                yield {
+                    "event": "cancelled",
+                    "data": json.dumps({
+                        "type": "cancelled",
+                        "run_id": str(run.id),
+                        "output_message_id": str(c_msg.id) if c_msg else None,
+                        "response": c_msg.content if c_msg else "[Generation stopped by user]",
+                        "message": "Generation stopped by user",
+                    }),
+                }
                 raise
             except Exception as e:
                 if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
                     await run_manager.fail_run(str(e))
                 raise
+            finally:
+                if disconnect_task and not disconnect_task.done():
+                    disconnect_task.cancel()
+                cancellation_manager.unregister(run.id)
 
         return create_sse_response(event_generator())
 

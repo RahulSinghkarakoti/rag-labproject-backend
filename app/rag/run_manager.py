@@ -157,6 +157,24 @@ class RunManager:
         logger.info("[RunManager] Failed step persisted | step_id=%s", step.id)
         return step
 
+    async def cancel_step(
+        self,
+        step: RunStep,
+        reason: str = "Request cancelled by user",
+    ) -> RunStep:
+        logger.warning(
+            "[RunManager] Step cancelled | step_id=%s | type=%s | reason=%s",
+            step.id,
+            step.step_type,
+            reason,
+        )
+        step.status = "cancelled"
+        step.completed_at = datetime.now(UTC)
+        step.error = {"code": "CANCELLED", "message": reason}
+        await self.db.commit()
+        logger.info("[RunManager] Cancelled step persisted | step_id=%s", step.id)
+        return step
+
     async def record_retrieval(
         self,
         *,

@@ -1,25 +1,50 @@
 import asyncio
+import logging
 from arq import create_pool
 from arq.connections import RedisSettings
-from app.workers import ingest_document
+
+from app.core.config import settings
+from app.core.lifespan import resolve_preload_models
+from app.core.model_config import SUPPORTED_EMBEDDING_MODELS, SUPPORTED_RERANKING_MODELS
 from app.rag.embeddings import preload_embedding_models
 from app.rag.model_registry import ModelRegistry
 from app.rag.reranking import preload_reranking_models
-from app.core.config import settings
-from app.core.lifespan import _configured_models
-from app.core.model_config import SUPPORTED_EMBEDDING_MODELS, SUPPORTED_RERANKING_MODELS
+from app.workers import ingest_document
+
+logger = logging.getLogger(__name__)
 
 
 async def startup(ctx):
     ctx["model_registry"] = ModelRegistry
-    preload_embedding_models(_configured_models(SUPPORTED_EMBEDDING_MODELS, "PRELOAD_EMBEDDING_MODELS"))
-    preload_reranking_models(_configured_models(SUPPORTED_RERANKING_MODELS, "PRELOAD_RERANKING_MODELS"))
-    print("[Worker] Ready; embedding and reranking models preloaded.", flush=True)
+
+    embedding_models = resolve_preload_models(
+        SUPPORTED_EMBEDDING_MODELS,
+        settings.PRELOAD_EMBEDDING_MODELS,
+        preload_all=settings.PRELOAD_ALL_MODELS,
+    )
+    reranking_models = resolve_preload_models(
+        SUPPORTED_RERANKING_MODELS,
+        settings.PRELOAD_RERANKING_MODELS,
+        preload_all=settings.PRELOAD_ALL_MODELS,
+    )
+
+    if embedding_models:
+        print(f"[Worker] Preloading embedding models: {embedding_models}", flush=True)
+        preload_embedding_models(embedding_models)
+    else:
+        print("[Worker] Skipping embedding model preload (deferred to lazy loading).", flush=True)
+
+    if reranking_models:
+        print(f"[Worker] Preloading reranking models: {reranking_models}", flush=True)
+        preload_reranking_models(reranking_models)
+    else:
+        print("[Worker] Skipping reranking model preload (deferred to lazy loading).", flush=True)
+
+    print("[Worker] Ready.", flush=True)
 
 
 async def shutdown(ctx):
-    print("[Worker] Shutting down...")
-
+    print("[Worker] Shutting down...", flush=True)
 
 
 # ARQ Worker Settings
