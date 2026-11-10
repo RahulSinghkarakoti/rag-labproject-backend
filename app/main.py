@@ -1,14 +1,19 @@
 import logging
+import os
 
 from fastapi import FastAPI
+
+from dotenv import load_dotenv 
+load_dotenv()
+
+from app.core.config import settings
+if getattr(settings, "HF_TOKEN", None) and "HF_TOKEN" not in os.environ:
+    os.environ["HF_TOKEN"] = settings.HF_TOKEN
 
 from app.api.router import register_routers
 from app.core.exception_handlers import register_exception_handlers
 from app.core.lifespan import lifespan
 from app.core.middleware import setup_cors
-
-from dotenv import load_dotenv 
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

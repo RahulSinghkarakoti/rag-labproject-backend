@@ -116,6 +116,7 @@ class QueryEngine:
         run.started_at = datetime.now(timezone.utc)
         run.status = "running"
         accumulated_tokens: list[str] = []
+        run_id = str(run.id) if run and getattr(run, "id", None) else "unknown"
 
         try:
             provider: BaseGenerationProvider = self.provider_factory.create(config)
@@ -134,10 +135,15 @@ class QueryEngine:
                     yield event
                     continue
 
+                if event["type"] in ("step_start", "step_complete", "step_failed", "step_cancelled", "context_status"):
+                    yield event
+                    continue
+
                 result = event["result"]
                 from app.core.cancellation import cancellation_manager
-                if cancellation_manager.is_cancelled(run.id) or run.status == "cancelled":
-                    raise asyncio.CancelledError(f"Run {run.id} was cancelled before completion")
+                run_status = getattr(run, "status", None)
+                if cancellation_manager.is_cancelled(run_id) or run_status == "cancelled":
+                    raise asyncio.CancelledError(f"Run {run_id} was cancelled before completion")
 
                 await self._persist_run_result(
                     run=run,
@@ -151,18 +157,22 @@ class QueryEngine:
                 await self.db.commit()
                 yield {
                     "type": "complete",
-                    "run_id": str(run.id),
+                    "run_id": str(run_id),
                     "output_message_id": result["output_message_id"],
                     "response": result["response"],
+                    "context_window": result.get("context_window"),
                 }
         except (asyncio.CancelledError, GeneratorExit, RuntimeError) as exc:
             if isinstance(exc, RuntimeError) and "CancelledError" not in str(exc):
                 raise exc
 
             p_text = "".join(accumulated_tokens).strip()
-            setattr(run, "_partial_text", p_text)
-            logger.info("[QueryEngine] Stream cancelled for run %s (accumulated %d chars)", run.id, len(p_text))
-            raise asyncio.CancelledError(f"Run {run.id} cancelled") from exc
+            try:
+                setattr(run, "_partial_text", p_text)
+            except Exception:
+                pass
+            logger.info("[QueryEngine] Stream cancelled for run %s (accumulated %d chars)", run_id, len(p_text))
+            raise asyncio.CancelledError(f"Run {run_id} cancelled") from exc
 
         except Exception as exc:
             safe_exc = (
@@ -196,8 +206,10 @@ class QueryEngine:
     ) -> None:
         """Persist the assistant message and the durable stages of a run."""
         from app.core.cancellation import cancellation_manager
-        if cancellation_manager.is_cancelled(run.id) or run.status == "cancelled":
-            logger.info("[QueryEngine] Skipping persistence for cancelled run %s", run.id)
+        run_id = str(getattr(run, "id", None) or "")
+        run_status = getattr(run, "status", None)
+        if (run_id and cancellation_manager.is_cancelled(run_id)) or run_status == "cancelled":
+            logger.info("[QueryEngine] Skipping persistence for cancelled run %s", run_id)
             return
 
         now = datetime.now(timezone.utc)
@@ -220,6 +232,7 @@ class QueryEngine:
             metadata_={
                 "run_id": str(run.id),
                 "citations": citations,
+                "context_window": result.get("context_window"),
                 "created_at": now.isoformat(),
             },
         )

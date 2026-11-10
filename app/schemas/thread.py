@@ -81,7 +81,7 @@ class RetrievalConfig(BaseModel):
 
 class RerankingConfig(BaseModel):
     enabled: bool = True
-    model: str = Field(default="BAAI/bge-reranker-base", min_length=1, max_length=200)
+    model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2", min_length=1, max_length=200)
     top_n: int = Field(default=10, ge=1, le=200)
     top_k: int = Field(default=5, ge=1, le=100)
     batch_size: int = Field(default=16, ge=1, le=256)

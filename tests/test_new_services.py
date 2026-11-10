@@ -200,7 +200,7 @@ async def test_run_service_get_and_cancel():
     assert cancelled_run.status == "cancelled"
     assert db.committed is True
     assert msg.status == "cancelled"
-    assert "[Generation stopped by user]" in msg.content
+    assert "[User interrupted this response]" in msg.content
 
 
 # --- ChatService Extended Methods Tests ---

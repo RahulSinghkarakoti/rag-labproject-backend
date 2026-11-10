@@ -51,7 +51,7 @@ def test_thread_config_defaults():
     assert config.retrieval.top_k == 8
     assert config.retrieval.alpha == 0.5
     assert config.reranking.enabled is True
-    assert config.reranking.model == "BAAI/bge-reranker-base"
+    assert config.reranking.model == "cross-encoder/ms-marco-MiniLM-L-6-v2"
     assert config.reranking.top_n == 10
     assert config.reranking.top_k == 5
     assert config.reranking.batch_size == 16

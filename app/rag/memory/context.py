@@ -28,6 +28,7 @@ def build_rag_context(
     queries: list[str],
     documents: list[Any],
     memory: list[dict[str, Any]],
+    summary: str | None = None,
 ) -> str:
     """
     Assemble the RAG context block that is injected into the generation prompt.
@@ -36,6 +37,7 @@ def build_rag_context(
         queries:   Transformed query strings produced by the query-transformation step.
         documents: Reranked (or retrieved) document objects with a ``.content`` attribute.
         memory:    Prior conversation turns as ``{"role": ..., "content": ...}`` dicts.
+        summary:   Optional progressive summary of earlier compacted conversation turns.
 
     Returns:
         A formatted multi-section string ready to be embedded in the generation prompt.
@@ -54,11 +56,44 @@ def build_rag_context(
         if turn.get("content")
     ) or "None"
 
-    return (
-        f"Transformed queries:\n{query_context}\n\n"
-        f"Conversation memory:\n{memory_context}\n\n"
-        f"Retrieved context:\n{document_context}"
-    )
+    sections = [f"Transformed queries:\n{query_context}"]
+    if summary and summary.strip():
+        sections.append(f"Conversation summary (older turns):\n{summary.strip()}")
+    sections.append(f"Recent conversation memory:\n{memory_context}")
+    sections.append(f"Retrieved context:\n{document_context}")
+
+    return "\n\n".join(sections)
+
+
+def estimate_context_tokens(text: str) -> int:
+    """
+    Heuristic estimation of token count for prompt/context text (~4 chars per token).
+    """
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def get_context_metrics(
+    prompt: str,
+    is_summarized: bool = False,
+    model_limit: int = 8192,
+) -> dict[str, Any]:
+    """
+    Calculate context usage metrics and threshold warnings.
+    """
+    tokens = estimate_context_tokens(prompt)
+    percentage = min(100, int((tokens / model_limit) * 100)) if model_limit > 0 else 0
+    warning = None
+    if percentage >= 80:
+        warning = "near_limit"
+    return {
+        "tokens": tokens,
+        "limit": model_limit,
+        "percentage": percentage,
+        "summarized": is_summarized,
+        "warning": warning,
+    }
 
 
 # ---------------------------------------------------------------------------

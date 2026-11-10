@@ -29,7 +29,7 @@ def mock_provider():
     return provider
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_query_pipeline_execute(mock_db, mock_provider):
     config = ThreadConfig()
     run = Run(id="run-123")

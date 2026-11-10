@@ -100,8 +100,17 @@ class RunService:
         run.completed_at = now
         run.error = {
             "code": "CANCELLED",
-            "message": "User stopped the retrieval or generation.",
+            "message": "User interrupted this response.",
         }
+
+        for step in (run.steps or []):
+            if step.status == "running":
+                step.status = "cancelled"
+                step.completed_at = now
+                step.error = {
+                    "code": "CANCELLED",
+                    "message": "User interrupted this response.",
+                }
 
         if run.output_message_id:
             msg = await self.db.scalar(
@@ -109,12 +118,32 @@ class RunService:
             )
             if msg:
                 msg.status = "cancelled"
+                msg.metadata_ = dict(msg.metadata_ or {})
+                msg.metadata_["interrupted_by_user"] = True
                 if not msg.content:
-                    msg.content = "[Generation stopped by user]"
-                elif "[Generation stopped by user]" not in msg.content:
+                    msg.content = "[User interrupted this response]"
+                elif "[User interrupted this response]" not in msg.content:
                     msg.content = (
-                        f"{msg.content}\n\n[Generation stopped by user]"
+                        f"{msg.content}\n\n[User interrupted this response]"
                     )
+        elif run.thread_id and run.input_message_id:
+            in_msg = await self.db.scalar(
+                select(Message).where(Message.id == run.input_message_id)
+            )
+            seq = ((in_msg.sequence or 0) + 1) if in_msg else 1
+            parent_id = in_msg.id if in_msg else None
+            new_msg = Message(
+                thread_id=run.thread_id,
+                parent_message_id=parent_id,
+                role="assistant",
+                content="[User interrupted this response]",
+                sequence=seq,
+                status="cancelled",
+                metadata_={"run_id": str(run.id), "interrupted_by_user": True},
+            )
+            self.db.add(new_msg)
+            await self.db.flush()
+            run.output_message_id = new_msg.id
 
         await self.db.commit()
         await self.db.refresh(run)

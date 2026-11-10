@@ -409,8 +409,9 @@ class ChatService:
             pipeline_version_id=pipeline_version.id,
             run_type="chat",
         )
+        run_id = run.id
 
-        cancellation_manager.register(run.id)
+        cancellation_manager.register(run_id)
         engine = QueryEngine(self.db, run_manager=run_manager)
 
         async def event_generator():
@@ -420,8 +421,8 @@ class ChatService:
                     try:
                         while True:
                             if await request.is_disconnected():
-                                logger.info("[stream_chat_run] Client disconnected for run %s", run.id)
-                                await cancellation_manager.cancel(run.id)
+                                logger.info("[stream_chat_run] Client disconnected for run %s", run_id)
+                                await cancellation_manager.cancel(run_id)
                                 break
                             await asyncio.sleep(0.5)
                     except asyncio.CancelledError:
@@ -431,7 +432,7 @@ class ChatService:
             try:
                 yield {
                     "event": "started",
-                    "data": json.dumps({"run_id": str(run.id), "message_id": str(user_message.id)}),
+                    "data": json.dumps({"run_id": str(run_id), "message_id": str(user_message.id)}),
                 }
                 async for event in engine.run_stream(
                     message=user_message,
@@ -441,23 +442,39 @@ class ChatService:
                 ):
                     yield {"event": event["type"], "data": json.dumps(event)}
 
-                if not cancellation_manager.is_cancelled(run.id) and run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
-                    await run_manager.complete_run()
+                if not cancellation_manager.is_cancelled(run_id):
+                    try:
+                        r_status = getattr(run_manager.run, "status", None)
+                    except Exception:
+                        r_status = None
+                    if r_status and r_status not in ("completed", "failed", "cancelled"):
+                        await run_manager.complete_run()
             except asyncio.CancelledError:
-                logger.info("[stream_chat_run] Handling cancellation for run %s", run.id)
+                logger.info("[stream_chat_run] Handling cancellation for run %s", run_id)
                 # Shield cancellation cleanup so database records are reliably persisted
                 async def _cleanup_cancellation():
                     from app.database.database import AsyncSessionLocal
                     p_text = getattr(run, "_partial_text", "").strip()
                     async with AsyncSessionLocal() as session:
-                        from app.models.run import Run as RunModel
+                        from app.models.run import Run as RunModel, RunStep as RunStepModel
                         from app.models.message import Message as MessageModel
-                        c_run = await session.get(RunModel, run.id)
+                        c_run = await session.get(RunModel, run_id)
                         if c_run and c_run.status != "completed":
                             c_run.status = "cancelled"
                             c_run.completed_at = datetime.now(timezone.utc)
-                            c_run.error = {"code": "CANCELLED", "message": "User stopped generation."}
-                            content = f"{p_text}\n\n[Generation stopped by user]" if p_text else "[Generation stopped by user]"
+                            c_run.error = {"code": "CANCELLED", "message": "User interrupted this response."}
+
+                            # Also cancel any running steps for this run in DB
+                            steps_res = await session.scalars(
+                                select(RunStepModel).where(RunStepModel.run_id == run_id)
+                            )
+                            for s in steps_res.all():
+                                if s.status == "running":
+                                    s.status = "cancelled"
+                                    s.completed_at = c_run.completed_at
+                                    s.error = {"code": "CANCELLED", "message": "User interrupted this response."}
+
+                            content = f"{p_text}\n\n[User interrupted this response]" if p_text else "[User interrupted this response]"
                             c_msg = MessageModel(
                                 thread_id=thread.id,
                                 parent_message_id=user_message.id,
@@ -465,7 +482,7 @@ class ChatService:
                                 content=content,
                                 sequence=(user_message.sequence or 0) + 1,
                                 status="cancelled",
-                                metadata_={"run_id": str(run.id)},
+                                metadata_={"run_id": str(run_id), "interrupted_by_user": True},
                             )
                             session.add(c_msg)
                             await session.flush()
@@ -474,26 +491,47 @@ class ChatService:
                             return c_run, c_msg
                     return None, None
 
-                _, c_msg = await asyncio.shield(_cleanup_cancellation())
-                yield {
-                    "event": "cancelled",
-                    "data": json.dumps({
-                        "type": "cancelled",
-                        "run_id": str(run.id),
-                        "output_message_id": str(c_msg.id) if c_msg else None,
-                        "response": c_msg.content if c_msg else "[Generation stopped by user]",
-                        "message": "Generation stopped by user",
-                    }),
-                }
+                cleanup_task = asyncio.create_task(_cleanup_cancellation())
+                c_msg = None
+                try:
+                    _, c_msg = await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as cleanup_err:
+                    logger.warning("[stream_chat_run] Cancellation cleanup error for run %s: %s", run_id, cleanup_err)
+
+                try:
+                    yield {
+                        "event": "cancelled",
+                        "data": json.dumps({
+                            "type": "cancelled",
+                            "run_id": str(run_id),
+                            "output_message_id": str(c_msg.id) if c_msg else None,
+                            "response": c_msg.content if c_msg else "[User interrupted this response]",
+                            "message": "User interrupted this response",
+                            "interrupted_by_user": True,
+                        }),
+                    }
+                except (asyncio.CancelledError, GeneratorExit):
+                    pass
                 raise
             except Exception as e:
-                if run_manager.run and run_manager.run.status not in ("completed", "failed", "cancelled"):
-                    await run_manager.fail_run(str(e))
+                if isinstance(e, asyncio.CancelledError) or "Cancelled" in type(e).__name__:
+                    raise
+                try:
+                    r_status = getattr(run_manager.run, "status", None)
+                except Exception:
+                    r_status = None
+                if r_status and r_status not in ("completed", "failed", "cancelled"):
+                    try:
+                        await run_manager.fail_run(str(e))
+                    except Exception:
+                        pass
                 raise
             finally:
                 if disconnect_task and not disconnect_task.done():
                     disconnect_task.cancel()
-                cancellation_manager.unregister(run.id)
+                cancellation_manager.unregister(run_id)
 
         return create_sse_response(event_generator())
 

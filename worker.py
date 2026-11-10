@@ -1,9 +1,17 @@
 import asyncio
 import logging
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.core.config import settings
+
+if settings.HF_TOKEN and "HF_TOKEN" not in os.environ:
+    os.environ["HF_TOKEN"] = settings.HF_TOKEN
 from app.core.lifespan import resolve_preload_models
 from app.core.model_config import SUPPORTED_EMBEDDING_MODELS, SUPPORTED_RERANKING_MODELS
 from app.rag.embeddings import preload_embedding_models

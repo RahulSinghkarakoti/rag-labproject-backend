@@ -48,7 +48,7 @@ def test_resolve_preload_models_specific_valid():
         configured_value="BAAI/bge-reranker-base, BAAI/bge-reranker-large",
         preload_all=False,
     )
-    assert set(result) == set(SUPPORTED_RERANKING_MODELS)
+    assert set(result) == {"BAAI/bge-reranker-base", "BAAI/bge-reranker-large"}
 
 
 def test_resolve_preload_models_invalid_raises():

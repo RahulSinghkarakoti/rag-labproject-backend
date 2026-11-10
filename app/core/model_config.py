@@ -9,6 +9,7 @@ SUPPORTED_EMBEDDING_MODELS = frozenset({
 })
 
 SUPPORTED_RERANKING_MODELS = frozenset({
+    "cross-encoder/ms-marco-MiniLM-L-6-v2",
     "BAAI/bge-reranker-base",
     "BAAI/bge-reranker-large",
 })

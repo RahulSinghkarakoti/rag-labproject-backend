@@ -14,10 +14,13 @@ class ModelRegistry:
         with cls._lock:
             if model_name not in cls.embedding_models:
                 if loader is None:
+                    from app.core.config import settings
                     from sentence_transformers import SentenceTransformer
 
-                    loader = SentenceTransformer
-                cls.embedding_models[model_name] = loader(model_name)
+                    token = getattr(settings, "HF_TOKEN", None)
+                    cls.embedding_models[model_name] = SentenceTransformer(model_name, token=token)
+                else:
+                    cls.embedding_models[model_name] = loader(model_name)
             return cls.embedding_models[model_name]
 
     @classmethod
@@ -25,10 +28,19 @@ class ModelRegistry:
         with cls._lock:
             if model_name not in cls.reranking_models:
                 if loader is None:
+                    import os
+                    import torch
+                    from app.core.config import settings
                     from sentence_transformers import CrossEncoder
 
-                    loader = CrossEncoder
-                cls.reranking_models[model_name] = loader(model_name)
+                    # Limit PyTorch CPU worker threads to avoid context switching thrashing
+                    cpu_count = os.cpu_count() or 4
+                    torch.set_num_threads(min(4, cpu_count))
+
+                    token = getattr(settings, "HF_TOKEN", None)
+                    cls.reranking_models[model_name] = CrossEncoder(model_name, token=token)
+                else:
+                    cls.reranking_models[model_name] = loader(model_name)
             return cls.reranking_models[model_name]
 
     @classmethod

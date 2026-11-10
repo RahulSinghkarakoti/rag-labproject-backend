@@ -39,12 +39,18 @@ class MockDB:
     async def rollback(self):
         pass
 
+    async def refresh(self, item):
+        pass
+
     async def execute(self, stmt):
         if self.execute_return is not None:
             return self.execute_return
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         return mock_result
+
+    async def scalar(self, stmt):
+        return None
 
 
 @pytest.mark.anyio
@@ -130,6 +136,75 @@ async def test_run_manager_cancel_step():
     assert step.status == "cancelled"
     assert step.completed_at is not None
     assert step.error == {"code": "CANCELLED", "message": "Aborted by user disconnect"}
+
+
+@pytest.mark.anyio
+async def test_run_manager_cancel_step_when_task_cancelled():
+    db = MockDB()
+    rm = RunManager(db)
+
+    step = RunStep(
+        run_id=uuid4(),
+        sequence=1,
+        step_type="reranking",
+        status="running",
+    )
+
+    async def _run():
+        asyncio.current_task().cancel()
+        return await rm.cancel_step(step, reason="Request cancelled by user")
+
+    result = await _run()
+    assert result.status == "cancelled"
+    assert result.completed_at is not None
+    assert result.error == {"code": "CANCELLED", "message": "Request cancelled by user"}
+
+
+@pytest.mark.anyio
+async def test_run_service_cancel_marks_running_steps_cancelled():
+    from app.services.run_service import RunService
+
+    db = MockDB()
+    service = RunService(db)
+
+    run_id = uuid4()
+    step1 = RunStep(run_id=run_id, sequence=1, step_type="retrieval", status="completed")
+    step2 = RunStep(run_id=run_id, sequence=2, step_type="reranking", status="running")
+    mock_run = Run(
+        id=run_id,
+        thread_id=uuid4(),
+        input_message_id=uuid4(),
+        status="running",
+    )
+    mock_run.steps = [step1, step2]
+
+    service.get_run_with_steps = AsyncMock(return_value=mock_run)
+    with patch("app.core.cancellation.cancellation_manager.cancel", new_callable=AsyncMock):
+        updated = await service.cancel_run(run_id=run_id, user_id=1)
+
+    assert updated.status == "cancelled"
+    assert step1.status == "completed"
+    assert step2.status == "cancelled"
+    assert step2.completed_at is not None
+    assert step2.error == {"code": "CANCELLED", "message": "User interrupted this response."}
+
+
+@pytest.mark.anyio
+async def test_serialize_step_with_expired_attributes():
+    from app.rag.pipeline.executor import serialize_step
+    from sqlalchemy.exc import PendingRollbackError
+
+    class ExpiredStep:
+        def __init__(self):
+            self.__dict__ = {"id": str(uuid4()), "status": "cancelled", "sequence": 1}
+
+        def __getattr__(self, item):
+            raise PendingRollbackError("Expired attribute access", None)
+
+    step = ExpiredStep()
+    serialized = serialize_step(step)
+    assert serialized["status"] == "cancelled"
+    assert "id" in serialized
 
 
 @pytest.mark.anyio

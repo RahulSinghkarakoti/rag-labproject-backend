@@ -20,6 +20,40 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def serialize_step(step: Any) -> dict[str, Any]:
+    if not step:
+        return {}
+    try:
+        from app.schemas.run import RunStepResponse
+        return RunStepResponse.model_validate(step).model_dump(mode="json")
+    except Exception:
+        pass
+
+    try:
+        d = getattr(step, "__dict__", {})
+        started = d.get("started_at") or getattr(step, "started_at", None)
+        completed = d.get("completed_at") or getattr(step, "completed_at", None)
+        return {
+            "id": str(d.get("id") or getattr(step, "id", "")),
+            "run_id": str(d.get("run_id") or getattr(step, "run_id", "")),
+            "step_type": d.get("step_type") or getattr(step, "step_type", ""),
+            "sequence": d.get("sequence") if d.get("sequence") is not None else getattr(step, "sequence", 0),
+            "status": d.get("status") or getattr(step, "status", "unknown"),
+            "input": d.get("input") if "input" in d else getattr(step, "input", None),
+            "output": d.get("output") if "output" in d else getattr(step, "output", None),
+            "config": d.get("config") if "config" in d else getattr(step, "config", None),
+            "error": d.get("error") if "error" in d else getattr(step, "error", None),
+            "started_at": started.isoformat() if hasattr(started, "isoformat") else started,
+            "completed_at": completed.isoformat() if hasattr(completed, "isoformat") else completed,
+            "metadata": d.get("metadata_") or getattr(step, "metadata_", {}) or {},
+        }
+    except Exception:
+        return {
+            "id": str(getattr(step, "id", "")),
+            "status": "cancelled",
+        }
+
+
 class PipelineStepExecutor:
     """
     Executes a single awaitable pipeline step with consistent structured logging.
@@ -49,6 +83,36 @@ class PipelineStepExecutor:
             from app.models.document import Document
         except ImportError:
             jsonable_encoder = lambda x: x  # noqa
+
+        if step_name == "memory":
+            if result is None:
+                return {
+                    "recent_turns": [],
+                    "turn_count": 0,
+                    "summary": None,
+                    "is_summarized": False,
+                }
+            if isinstance(result, tuple) and len(result) == 3:
+                turns, summary_text, is_summarized = result
+                encoded_turns = jsonable_encoder(turns) if turns else []
+                return {
+                    "recent_turns": encoded_turns,
+                    "turn_count": len(encoded_turns),
+                    "summary": summary_text,
+                    "is_summarized": bool(is_summarized),
+                }
+            elif isinstance(result, list):
+                encoded = jsonable_encoder(result)
+                return {
+                    "recent_turns": encoded,
+                    "turn_count": len(encoded),
+                    "summary": None,
+                    "is_summarized": False,
+                }
+            elif isinstance(result, dict):
+                return jsonable_encoder(result)
+            return jsonable_encoder(result)
+
         if isinstance(result, list):
             if not result:
                 return []
@@ -153,6 +217,94 @@ class PipelineStepExecutor:
             )
             if self.run_manager and step:
                 await self.run_manager.fail_step(step, str(exc))
+            raise
+
+    async def run_step_stream(
+        self,
+        step_name: str,
+        coro: Coroutine[Any, Any, T] | Awaitable[T],
+        input_data: dict | None = None,
+        config: dict | None = None,
+    ):
+        """
+        Execute a pipeline step as an async generator, emitting:
+        ("step_start", step_data, None) before running,
+        ("step_complete", step_data, result) after success,
+        or ("step_failed" / "step_cancelled", step_data, None) on exception.
+        """
+        import asyncio
+
+        logger.info(
+            "pipeline_step step=%s state=waiting run_id=%s provider=%s model=%s",
+            step_name,
+            self.context.run_id,
+            self.context.provider_name,
+            self.context.model_name,
+        )
+
+        step = None
+        if self.run_manager:
+            step = await self.run_manager.start_step(
+                step_name, input_data=input_data, config=config
+            )
+            yield ("step_start", serialize_step(step), None)
+
+        start = time.monotonic()
+        try:
+            result = await coro
+            elapsed = time.monotonic() - start
+            count_str = (
+                f" count={len(result)}"  # type: ignore[arg-type]
+                if hasattr(result, "__len__")
+                else ""
+            )
+            logger.info(
+                "pipeline_step step=%s state=completed elapsed=%.3fs%s run_id=%s",
+                step_name,
+                elapsed,
+                count_str,
+                self.context.run_id,
+            )
+            if self.run_manager and step:
+                out = self._format_output_for_db(step_name, result)
+                step = await self.run_manager.complete_step(
+                    step,
+                    output_data=out,
+                    metadata={"elapsed_seconds": round(elapsed, 4)},
+                )
+                yield ("step_complete", serialize_step(step), result)
+            else:
+                yield ("step_complete", {}, result)
+        except asyncio.CancelledError:
+            elapsed = time.monotonic() - start
+            logger.warning(
+                "pipeline_step step=%s state=cancelled elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+            )
+            if self.run_manager and step:
+                if hasattr(self.run_manager, "cancel_step"):
+                    step = await self.run_manager.cancel_step(step, "Request cancelled by user")
+                else:
+                    step = await self.run_manager.fail_step(step, "Request cancelled by user")
+                try:
+                    yield ("step_cancelled", serialize_step(step), None)
+                except (asyncio.CancelledError, GeneratorExit):
+                    pass
+            raise
+        except Exception as exc:
+            elapsed = time.monotonic() - start
+            logger.error(
+                "pipeline_step step=%s state=failed elapsed=%.3fs run_id=%s",
+                step_name,
+                elapsed,
+                self.context.run_id,
+                exc_info=True,
+            )
+            if self.run_manager and step:
+                step = await self.run_manager.fail_step(step, str(exc))
+                yield ("step_failed", serialize_step(step), None)
             raise
 
     async def run(

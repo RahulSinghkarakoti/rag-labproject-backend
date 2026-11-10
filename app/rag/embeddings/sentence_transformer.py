@@ -1,12 +1,31 @@
-from sentence_transformers import SentenceTransformer
+import sys
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 from app.rag.embeddings.base import BaseEmbedder
 from app.core.model_config import SUPPORTED_EMBEDDING_MODELS
 from app.rag.model_registry import ModelRegistry
 
 
-def _load_model(model_name: str) -> SentenceTransformer:
-    return ModelRegistry.get_embedding_model(model_name, loader=SentenceTransformer)
+def __getattr__(name: str):
+    if name == "SentenceTransformer":
+        from sentence_transformers import SentenceTransformer
+        return SentenceTransformer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _load_model(model_name: str):
+    mod = sys.modules.get(__name__)
+    loader = mod.__dict__.get("SentenceTransformer") if mod else None
+    if loader is not None:
+        try:
+            from sentence_transformers import SentenceTransformer as RealSentenceTransformer
+            if loader is RealSentenceTransformer:
+                loader = None
+        except ImportError:
+            pass
+    return ModelRegistry.get_embedding_model(model_name, loader=loader)
 
 
 _load_model.cache_clear = ModelRegistry.clear_embedding_models

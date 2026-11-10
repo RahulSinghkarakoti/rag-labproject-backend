@@ -6,9 +6,7 @@ from fastapi import FastAPI
 from app.core.config import settings
 from app.core.model_config import SUPPORTED_EMBEDDING_MODELS, SUPPORTED_RERANKING_MODELS
 from app.core.redis import close_redis_pool, init_redis_pool
-from app.rag.embeddings import preload_embedding_models
 from app.rag.model_registry import ModelRegistry
-from app.rag.reranking import preload_reranking_models
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +63,14 @@ async def lifespan(app: FastAPI):
 
     if embedding_models:
         logger.info("[Lifespan] Preloading embedding models: %s", embedding_models)
+        from app.rag.embeddings import preload_embedding_models
         preload_embedding_models(embedding_models)
     else:
         logger.info("[Lifespan] Skipping embedding model preloading (deferred to lazy loading)")
 
     if reranking_models:
         logger.info("[Lifespan] Preloading reranking models: %s", reranking_models)
+        from app.rag.reranking import preload_reranking_models
         preload_reranking_models(reranking_models)
     else:
         logger.info("[Lifespan] Skipping reranking model preloading (deferred to lazy loading)")

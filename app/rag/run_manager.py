@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -141,10 +142,12 @@ class RunManager:
         step: RunStep,
         error: Exception | dict | str,
     ) -> RunStep:
+        step_id = getattr(step, "id", None)
+        step_type = getattr(step, "step_type", None)
         logger.error(
             "[RunManager] Step failed | step_id=%s | type=%s | error=%s",
-            step.id,
-            step.step_type,
+            step_id,
+            step_type,
             error,
             exc_info=error if isinstance(error, Exception) else None,
         )
@@ -153,8 +156,30 @@ class RunManager:
         step.error = (
             {"message": str(error)} if isinstance(error, (Exception, str)) else error
         )
-        await self.db.commit()
-        logger.info("[RunManager] Failed step persisted | step_id=%s", step.id)
+        try:
+            await self.db.commit()
+            logger.info("[RunManager] Failed step persisted | step_id=%s", step_id)
+        except Exception as err:
+            logger.warning("[RunManager] Failed to commit failed step via main session (%s). Using fallback session.", err)
+            try:
+                if getattr(self.db, "is_active", False):
+                    await self.db.rollback()
+            except Exception:
+                pass
+            if step_id:
+                try:
+                    from app.database.database import AsyncSessionLocal
+                    from app.models.run import RunStep as RunStepModel
+                    async with AsyncSessionLocal() as session:
+                        s = await session.get(RunStepModel, step_id)
+                        if s:
+                            s.status = "failed"
+                            s.completed_at = datetime.now(UTC)
+                            s.error = step.error
+                            await session.commit()
+                            logger.info("[RunManager] Failed step persisted via fallback session | step_id=%s", step_id)
+                except Exception as fallback_err:
+                    logger.warning("[RunManager] Fallback fail_step persist failed: %s", fallback_err)
         return step
 
     async def cancel_step(
@@ -162,17 +187,53 @@ class RunManager:
         step: RunStep,
         reason: str = "Request cancelled by user",
     ) -> RunStep:
+        step_id = getattr(step, "id", None)
+        step_type = getattr(step, "step_type", None)
         logger.warning(
             "[RunManager] Step cancelled | step_id=%s | type=%s | reason=%s",
-            step.id,
-            step.step_type,
+            step_id,
+            step_type,
             reason,
         )
         step.status = "cancelled"
         step.completed_at = datetime.now(UTC)
         step.error = {"code": "CANCELLED", "message": reason}
-        await self.db.commit()
-        logger.info("[RunManager] Cancelled step persisted | step_id=%s", step.id)
+
+        # Safely rollback any in-flight transaction on self.db so it does not
+        # linger in PendingRollbackError.
+        try:
+            if getattr(self.db, "is_active", False):
+                await asyncio.shield(self.db.rollback())
+        except Exception:
+            pass
+
+        # Persist step cancellation reliably using an isolated database session
+        # inside a shielded background task so it succeeds even if the caller task
+        # was cancelled.
+        if step_id:
+            async def _persist_cancelled_step():
+                try:
+                    from app.database.database import AsyncSessionLocal
+                    from app.models.run import RunStep as RunStepModel
+                    async with AsyncSessionLocal() as session:
+                        s = await session.get(RunStepModel, step_id)
+                        if s and s.status not in ("completed", "failed", "cancelled"):
+                            s.status = "cancelled"
+                            s.completed_at = datetime.now(UTC)
+                            s.error = {"code": "CANCELLED", "message": reason}
+                            await session.commit()
+                            logger.info("[RunManager] Cancelled step persisted | step_id=%s", step_id)
+                except Exception as err:
+                    logger.warning("[RunManager] Failed to persist step cancellation: %s", err)
+
+            task = asyncio.create_task(_persist_cancelled_step())
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning("[RunManager] Error awaiting cancellation persist task: %s", e)
+
         return step
 
     async def record_retrieval(
