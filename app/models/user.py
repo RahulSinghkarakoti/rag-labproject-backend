@@ -1,10 +1,15 @@
 from datetime import datetime
-from typing import List
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, func ,Integer
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.auth_log import AuthLog
+    from app.models.oauth_account import OAuthAccount
+    from app.models.refresh_token import RefreshToken
 
 
 class User(Base):
@@ -57,16 +62,16 @@ class User(Base):
         nullable=False,
     )
 
-    oauth_accounts: Mapped[List["OAuthAccount"]] = relationship(
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
-    refresh_tokens: Mapped[List["RefreshToken"]] = relationship(
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
-    auth_logs: Mapped[List["AuthLog"]] = relationship(
+    auth_logs: Mapped[list["AuthLog"]] = relationship(
         back_populates="user",
     )

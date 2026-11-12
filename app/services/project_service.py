@@ -1,5 +1,4 @@
 from uuid import UUID
-from typing import List
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -27,7 +26,7 @@ class ProjectService:
             )
         return project
 
-    async def get_projects(self, user_id: int) -> List[Project]:
+    async def get_projects(self, user_id: int) -> list[Project]:
         result = await self.db.execute(
             select(Project).where(Project.user_id == user_id)
         )

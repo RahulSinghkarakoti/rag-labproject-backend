@@ -1,6 +1,7 @@
-from uuid import uuid4
-import pytest
 from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
 
 from app.models.message import Message
 from app.models.run import Run
@@ -24,7 +25,7 @@ class FakeDB:
 async def test_retry_creates_new_message_with_same_parent_id():
     db = FakeDB()
     thread_id = uuid4()
-    
+
     # Human message
     user_msg = Message(
         thread_id=thread_id,
@@ -72,8 +73,8 @@ async def test_retry_creates_new_message_with_same_parent_id():
 
 @pytest.mark.anyio
 async def test_edit_message_branches_without_truncation():
-    from app.services.chat_service import ChatService
     from app.models.thread import Thread
+    from app.services.chat_service import ChatService
 
     class MockAsyncSession:
         def __init__(self, items):
@@ -112,7 +113,7 @@ async def test_edit_message_branches_without_truncation():
     service = ChatService(mock_db)
 
     edited_msg = await service.edit_message(thread, orig_msg.id, "Edited question")
-    
+
     # Check that edited message is a separate message with same parent and sequence
     assert edited_msg.id != orig_msg.id
     assert edited_msg.content == "Edited question"

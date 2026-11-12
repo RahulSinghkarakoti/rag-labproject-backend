@@ -6,7 +6,6 @@ can use chat history as context during query transformation and generation.
 """
 import logging
 from typing import Any
-
 from uuid import uuid4
 
 from sqlalchemy import select

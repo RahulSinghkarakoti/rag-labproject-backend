@@ -1,6 +1,5 @@
 import hashlib
 from pathlib import Path
-from typing import List
 from uuid import UUID, uuid4
 
 import anyio
@@ -65,9 +64,9 @@ class DocumentService:
         self,
         project_id: UUID,
         kb_id: UUID,
-        files: List[UploadFile],
+        files: list[UploadFile],
         current_user: User,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Save uploaded files to disk, deduplicate by checksum, persist DB records,
 
         publish SSE status events, and enqueue ingestion tasks in Redis.
@@ -81,8 +80,8 @@ class DocumentService:
                 detail="Background worker queue is not available",
             )
 
-        processed_documents: List[Document] = []
-        new_documents: List[Document] = []
+        processed_documents: list[Document] = []
+        new_documents: list[Document] = []
 
         for file in files:
             checksum = await self.calculate_checksum(file)
@@ -152,7 +151,7 @@ class DocumentService:
         project_id: UUID,
         kb_id: UUID,
         user_id: int,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Verify KB ownership and return all documents in the knowledge base."""
         await self.verify_kb_ownership(project_id, kb_id, user_id)
         stmt = select(Document).where(Document.knowledge_base_id == kb_id)

@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -12,8 +12,8 @@ from app.core.security import (
     create_refresh_token,
     hash_refresh_token,
 )
-from app.models.auth import OAuthAccount, RefreshToken
 from app.models.audit_log import AuthLog
+from app.models.auth import OAuthAccount, RefreshToken
 from app.models.user import User
 from app.schemas.auth import AuthResponse, OAuthLoginRequest
 
@@ -119,7 +119,7 @@ class AuthService:
             user_id=user.id,
             token_hash=hash_refresh_token(refresh_token),
             expires_at=(
-                datetime.now(timezone.utc)
+                datetime.now(UTC)
                 + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
             ),
         )
@@ -165,7 +165,7 @@ class AuthService:
                 detail="Invalid refresh token",
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if stored_token.revoked_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -233,7 +233,7 @@ class AuthService:
         )
         stored_token = result.scalar_one_or_none()
         if stored_token:
-            stored_token.revoked_at = datetime.now(timezone.utc)
+            stored_token.revoked_at = datetime.now(UTC)
             self._log_event(
                 user_id=stored_token.user_id,
                 event="logout",

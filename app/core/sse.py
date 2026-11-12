@@ -1,8 +1,9 @@
 import json
-from typing import Any, AsyncGenerator, Dict, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from fastapi.responses import StreamingResponse
 import redis.asyncio as aioredis
+from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
 
@@ -49,7 +50,7 @@ def create_sse_response(generator: AsyncGenerator) -> StreamingResponse:
                 yield f"event: {event}\ndata: {data}\n\n"
             else:
                 yield f"data: {item}\n\n"
-    
+
     return StreamingResponse(
         format_sse(),
         media_type="text/event-stream",

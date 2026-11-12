@@ -1,6 +1,6 @@
 # Retrieval Workflow Pipeline Flow
 
-The **Retrieval Workflow Pipeline** coordinates document retrieval across multiple Knowledge Bases. It supports single and hybrid retrieval strategies, model-based grouping, query candidate aggregation, score fusion, and diversity-aware candidate selection (MMR).
+The **Retrieval Workflow Pipeline** coordinates multi-Knowledge-Base document search. It supports single and hybrid search strategies, embedding model grouping, candidate query aggregation, score fusion, and Maximal Marginal Relevance (MMR) candidate diversity optimization.
 
 ---
 
@@ -8,40 +8,40 @@ The **Retrieval Workflow Pipeline** coordinates document retrieval across multip
 
 ```mermaid
 flowchart TD
-    Input(["🔍 Retrieval Query Request<br/>(queries: list[str], knowledge_bases: list)"]) --> GroupKB["1. Group Knowledge Bases by Embedding Model<br/>(by_model[model] -> KB IDs)"]
-    
+    Input(["🔍 Retrieval Query Request<br/>(queries: list[str], knowledge_bases: list, config: RetrievalConfig)"]) --> GroupKB["1. Group Knowledge Bases by Embedding Model<br/>(by_model[model] -> list of KB IDs)"]
+
     GroupKB --> ModelLoop{"For Each Embedding Model Group"}
-    
-    subgraph CandidateGathering ["Candidate Search Across Queries"]
-        ModelLoop -->|Model Group| InitEmbedder["Instantiate Model Embedder<br/>SentenceTransformerEmbedder(model)"]
-        InitEmbedder --> QueryLoop{"For Each Transformed Query"}
-        
-        %% Dense Branch
-        QueryLoop --> CheckDense{"Strategy in {dense, hybrid, mmr}?"}
-        CheckDense -->|Yes| DenseSearch["retrieve_dense(vector_store, embedder, query)"]
-        DenseSearch --> SimFilter{"Similarity Threshold Set?"}
-        SimFilter -->|Yes| FilterDense["Filter candidates where score >= threshold"]
-        SimFilter -->|No| CollectDense["Add candidates to all_dense"]
-        FilterDense --> CollectDense
-        
-        %% Sparse Branch
-        QueryLoop --> CheckSparse{"Strategy in {sparse, hybrid}?"}
-        CheckSparse -->|Yes| SparseSearch["retrieve_sparse(vector_store, query, sparse_model)"]
-        SparseSearch --> CollectSparse["Add candidates to all_sparse"]
-        
-        CollectDense --> QueryLoop
-        CollectSparse --> QueryLoop
+
+    subgraph CandidateGathering ["2. Parallel Candidate Search Across Transformed Queries"]
+        ModelLoop -->|Model Group| InitEmbedder["Instantiate Group Embedder<br/>SentenceTransformerEmbedder(model_name=model)"]
+        InitEmbedder --> QueryGather["asyncio.gather across all transformed queries"]
+
+        subgraph PerQuery ["Query Processing"]
+            %% Dense Branch
+            QueryGather --> CheckDense{"Strategy in {dense, hybrid, mmr}?"}
+            CheckDense -->|Yes| DenseSearch["retrieve_dense(vector_store, embedder, query, top_k/fetch_k, filters)"]
+            DenseSearch --> SimFilter{"Similarity Threshold Set?"}
+            SimFilter -->|Yes| FilterDense["Filter candidates where cosine score >= threshold"]
+            SimFilter -->|No| CollectDense["Collect dense candidates"]
+            FilterDense --> CollectDense
+
+            %% Sparse Branch
+            QueryGather --> CheckSparse{"Strategy in {sparse, hybrid}?"}
+            CheckSparse -->|Yes| SparseSearch["retrieve_sparse(vector_store, query, sparse_model, top_k, filters)"]
+            SparseSearch --> CollectSparse["Collect sparse candidates"]
+        end
     end
 
-    QueryLoop -->|All Queries Processed| DeduplicateQueries["2. Deduplicate Candidates Across Queries<br/>(deduplicate_scored: keep max score per doc_id)"]
+    CollectDense --> DeduplicateCandidates["3. Deduplicate Candidates Across Queries<br/>(deduplicate_scored: keep max score per doc_id)"]
+    CollectSparse --> DeduplicateCandidates
 
-    subgraph StrategySelection ["3. Strategy Fusion & Selection"]
-        DeduplicateQueries --> StrategyBranch{"Configured Retrieval Strategy?"}
-        
-        StrategyBranch -->|dense| SelectDense["Sort all_dense by vector score descending<br/>Take top_k candidates"]
+    subgraph StrategySelection ["4. Strategy Fusion & Selection"]
+        DeduplicateCandidates --> StrategyBranch{"Configured Retrieval Strategy?"}
+
+        StrategyBranch -->|dense| SelectDense["Sort all_dense by cosine similarity descending<br/>Take top_k candidates"]
         StrategyBranch -->|sparse| SelectSparse["Sort all_sparse by BM25 score descending<br/>Take top_k candidates"]
         StrategyBranch -->|hybrid| SelectHybrid["weighted_fusion(all_dense, all_sparse, alpha, top_k)<br/>Combine dense vector & sparse BM25 scores"]
-        StrategyBranch -->|mmr| SelectMMR["maximal_marginal_relevance(query_embed, all_dense, top_k, lambda)<br/>Optimize relevancy vs chunk diversity"]
+        StrategyBranch -->|mmr| SelectMMR["maximal_marginal_relevance(query_embedding, all_dense, top_k, mmr_lambda)<br/>Balance relevance vs chunk redundancy"]
     end
 
     SelectDense --> GroupCollect["Collect selected documents for model group"]
@@ -50,8 +50,8 @@ flowchart TD
     SelectMMR --> GroupCollect
 
     GroupCollect --> ModelLoop
-    ModelLoop -->|All Model Groups Completed| GlobalDeduplication["4. Final Global Deduplication & Truncation<br/>Keep unique docs up to global top_k limit"]
-    
+    ModelLoop -->|All Model Groups Processed| GlobalDeduplication["5. Final Global Deduplication & Truncation<br/>Deduplicate by doc_id and limit to global top_k"]
+
     GlobalDeduplication --> Output(["📦 Retrieved Candidates Output"])
 ```
 
@@ -59,23 +59,35 @@ flowchart TD
 
 ## 🔬 Detailed Strategy Breakdown
 
-### 1. Dense Vector Retrieval (`dense`)
+### 1. Model Grouping & Candidate Gathering
+- **Module**: [`app/rag/retrieval/workflow.py`](../app/rag/retrieval/workflow.py)
+- **Action**:
+  - Groups Knowledge Bases attached to the thread by their embedding model (`by_model[model]`).
+  - Instantiates `SentenceTransformerEmbedder` once per model group.
+  - Executes candidate retrieval in parallel across all transformed queries using `asyncio.gather`.
+  - Filters searches by `knowledge_base_id` array.
+
+### 2. Dense Vector Search (`dense`)
 - **Module**: [`app/rag/retrieval/dense.py`](../app/rag/retrieval/dense.py)
 - **Algorithm**: Performs cosine similarity / inner product vector search against PostgreSQL `pgvector` index using query embeddings generated by `SentenceTransformerEmbedder`.
-- **Filtering**: Filters candidates by `knowledge_base_id` and optional `similarity_threshold`.
+- **Filtering**: Filters candidates by `similarity_threshold` when configured (`RetrievalConfig.similarity_threshold`).
 
-### 2. Sparse Keyword Retrieval (`sparse`)
+### 3. Sparse Keyword Search (`sparse`)
 - **Module**: [`app/rag/retrieval/sparse.py`](../app/rag/retrieval/sparse.py)
-- **Algorithm**: Executes full-text BM25 keyword search using PostgreSQL `tsvector` / text search configurations. Ideal for exact keyword, code, or identifier matching.
+- **Algorithm**: Executes full-text BM25 keyword search using PostgreSQL `tsvector` / text search capabilities (`RetrievalConfig.sparse_model="bm25"`). Ideal for exact term, code, product code, or identifier matching.
 
-### 3. Hybrid Weighted Fusion (`hybrid`)
+### 4. Hybrid Weighted Score Fusion (`hybrid`)
 - **Module**: [`app/rag/retrieval/fusion.py`](../app/rag/retrieval/fusion.py)
-- **Algorithm**: Merges dense vector and sparse BM25 candidate rankings using parameter $\alpha \in [0, 1]$:
+- **Algorithm**: Merges dense vector and sparse BM25 candidate rankings using parameter $\alpha \in [0, 1]$ (`RetrievalConfig.alpha`):
   $$\text{Score}_{\text{hybrid}} = \alpha \cdot \text{Score}_{\text{dense}} + (1 - \alpha) \cdot \text{Score}_{\text{sparse}}$$
-- Balances semantic context understanding with exact lexical keyword matching.
+- Normalizes dense and sparse scores into $[0, 1]$ before combining to balance semantic context understanding with exact lexical keyword matching.
 
-### 4. Maximal Marginal Relevance (`mmr`)
+### 5. Maximal Marginal Relevance (`mmr`)
 - **Module**: [`app/rag/retrieval/mmr.py`](../app/rag/retrieval/mmr.py)
 - **Algorithm**: Iteratively selects documents that maximize query relevance while minimizing redundancy with already selected chunks:
   $$\text{MMR} = \arg\max_{D_i \in R \setminus S} \left[ \lambda \cdot \text{Sim}_1(D_i, Q) - (1 - \lambda) \max_{D_j \in S} \text{Sim}_2(D_i, D_j) \right]$$
-- Controlled by `mmr_lambda` (tradeoff parameter between relevance and diversity).
+- Driven by `RetrievalConfig.mmr_lambda` ($\lambda \in [0, 1]$, balancing relevance vs diversity) and `fetch_k` candidate pool size.
+
+### 6. Candidate Deduplication & Global Truncation
+- **Deduplication**: `deduplicate_scored()` keeps the highest-scoring occurrence of each document chunk across queries.
+- **Global Truncation**: After collecting results across all embedding model groups, performs a final global deduplication pass by `doc_id` and clips the output array to `RetrievalConfig.top_k`.

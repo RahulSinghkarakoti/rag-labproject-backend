@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -34,7 +33,7 @@ class RunService:
         run.steps.sort(key=lambda s: s.sequence)
         return run
 
-    async def get_run_steps(self, run_id: UUID, user_id: int) -> List[RunStep]:
+    async def get_run_steps(self, run_id: UUID, user_id: int) -> list[RunStep]:
         run = await self.get_run_with_steps(run_id, user_id)
         return run.steps
 
@@ -95,7 +94,7 @@ class RunService:
         if run.status in ["completed", "failed", "cancelled"]:
             return run
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         run.status = "cancelled"
         run.completed_at = now
         run.error = {

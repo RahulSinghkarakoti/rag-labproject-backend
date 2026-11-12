@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
-import pytest
 
 from app.api.auth import oauth_login
 from app.api.knowledge_base import get_knowledge_base_documents, update_knowledge_base

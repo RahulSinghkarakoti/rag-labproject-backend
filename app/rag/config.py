@@ -1,9 +1,9 @@
 # app/rag/config.py
 from app.schemas.thread import (
-    QueryTransformationConfig,
-    RetrievalConfig,
-    RerankingConfig,
     GenerationConfig,
+    QueryTransformationConfig,
+    RerankingConfig,
+    RetrievalConfig,
     ThreadConfig,
 )
 

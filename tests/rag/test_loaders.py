@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import pytest
+
 from app.rag.loaders.factory import LoaderFactory
 
 
@@ -15,7 +17,7 @@ def test_pdf_loader():
     assert len(documents) > 0
     assert documents[0].page_content
 
-    print(f"\nLoaded PDF documents: {len(documents)}") 
+    print(f"\nLoaded PDF documents: {len(documents)}")
 
 
 def test_text_loader():
@@ -29,4 +31,4 @@ def test_text_loader():
     assert len(documents) > 0
     assert documents[0].page_content
 
-    print(f"\nLoaded Text documents: {len(documents)}") 
+    print(f"\nLoaded Text documents: {len(documents)}")

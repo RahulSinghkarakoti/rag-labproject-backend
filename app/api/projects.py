@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -16,7 +15,7 @@ router = APIRouter(
 )
 
 
-@router.get("/projects", response_model=APIResponse[List[ProjectResponse]])
+@router.get("/projects", response_model=APIResponse[list[ProjectResponse]])
 async def get_projects(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

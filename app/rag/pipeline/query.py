@@ -22,11 +22,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, List
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cancellation import cancellation_manager
 from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
 from app.models.run import Run
@@ -47,7 +48,6 @@ from app.rag.reranking import rerank_documents
 from app.rag.retrieval.workflow import RetrievalWorkflow
 from app.rag.vectorstore import PgVectorStore
 from app.schemas.thread import ThreadConfig
-from app.core.cancellation import cancellation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -134,20 +134,6 @@ class QueryPipeline:
     # Public execution interface
     # ------------------------------------------------------------------
 
-
-    async def execute(self) -> dict[str, Any]:
-        """
-        Executes the full RAG pipeline (non-streaming) and returns the result dict.
-
-        The result dict shape is stable — callers such as ``QueryEngine``
-        use ``result.get(...)`` on keys defined in :meth:`_build_result`.
-        """
-        state = await self._prepare()
-        if state.is_greeting:
-            response = state.greeting_response
-        else:
-            response = await self._generate(self.message.content, state.context)
-        return self._build_result(state, response)
 
     def _check_cancellation(self) -> None:
         if self.run and hasattr(self.run, "id"):
@@ -387,77 +373,6 @@ class QueryPipeline:
 
 
     # ------------------------------------------------------------------
-    # Prepare phase — runs all stages in sequence, returns PipelineState
-    # ------------------------------------------------------------------
-
-    async def _prepare(self) -> PipelineState:
-        """
-        Run all pre-generation stages (memory → transform → retrieve → rerank → context).
-
-        Each stage is wrapped by :class:`~app.rag.pipeline.executor.PipelineStepExecutor`
-        so that timing and structured logs are emitted automatically.
-        """
-        self._log_stage("prepare", "waiting")
-        self._check_cancellation()
-
-        # Fast path: greeting check to skip expensive LLM/vector search pipeline
-
-        # 1. Memory — load prior conversation turns
-        mem_res = await self.executor.run(
-            "memory",
-            self._load_memory(),
-        )
-        if isinstance(mem_res, tuple) and len(mem_res) == 3:
-            memory, summary, is_summarized = mem_res
-        elif isinstance(mem_res, list):
-            memory, summary, is_summarized = mem_res, None, False
-        else:
-            memory, summary, is_summarized = [], None, False
-        self._check_cancellation()
-
-        # 2. Query Transformation — expand / rewrite / hyde / passthrough
-        transformed_queries: list[str] = await self.executor.run(
-            "transformation",
-            self._process_query(self.message.content, memory),
-            input_data={"query": self.message.content, "memory_length": len(memory)},
-            config=self.thread_config.query_transformation.model_dump(),
-        )
-        self._check_cancellation()
-
-        # 3. Retrieval — dense / sparse / hybrid / mmr across knowledge bases
-        retrieved_documents = await self.executor.run(
-            "retrieval",
-            self._retrieve(transformed_queries),
-            input_data={"queries": transformed_queries},
-            config=self.thread_config.retrieval.model_dump(),
-        )
-        self._check_cancellation()
-
-        # 4. Reranking — cross-encoder reranking (skipped when disabled)
-        reranked_documents = await self.executor.run(
-            "reranking",
-            self._rerank(transformed_queries, retrieved_documents),
-            input_data={"queries": transformed_queries, "document_count": len(retrieved_documents)},
-            config=self.thread_config.reranking.model_dump() if self.thread_config.reranking.enabled else None,
-        )
-        self._check_cancellation()
-
-        # 5. Context assembly — build the prompt context block
-        context = build_rag_context(transformed_queries, reranked_documents, memory, summary=summary)
-        self._log_stage("context", "completed")
-
-        return PipelineState(
-            memory=memory,
-            summary=summary,
-            is_summarized=is_summarized,
-            transformed_queries=transformed_queries,
-            retrieved_documents=retrieved_documents,
-            reranked_documents=reranked_documents,
-            context=context,
-        )
-
-
-    # ------------------------------------------------------------------
     # Result builder — keeps a stable dict shape for engine.py
     # ------------------------------------------------------------------
 
@@ -475,7 +390,7 @@ class QueryPipeline:
             "transformation_mode": self.thread_config.query_transformation.mode,
             "retrieved_documents": [
                 {
-                    "id": str(doc.id), 
+                    "id": str(doc.id),
                     "content": doc.content,
                     "name": doc.document.name if getattr(doc, "document", None) else "Unknown",
                     "mime_type": doc.document.mime_type if getattr(doc, "document", None) else None
@@ -484,7 +399,7 @@ class QueryPipeline:
             ],
             "reranked_documents": [
                 {
-                    "id": str(doc.id), 
+                    "id": str(doc.id),
                     "content": doc.content,
                     "name": doc.document.name if getattr(doc, "document", None) else "Unknown",
                     "mime_type": doc.document.mime_type if getattr(doc, "document", None) else None
@@ -503,8 +418,8 @@ class QueryPipeline:
     # ------------------------------------------------------------------
 
     async def _process_query(
-        self, query: str, memory: List[dict[str, Any]]
-    ) -> List[str]:
+        self, query: str, memory: list[dict[str, Any]]
+    ) -> list[str]:
         """
         Delegate query transformation to the configured strategy.
 
@@ -520,7 +435,7 @@ class QueryPipeline:
             memory=memory,
         )
 
-    async def _retrieve(self, queries: List[str]):
+    async def _retrieve(self, queries: list[str]):
         """
         Run configured retrieval across all knowledge bases attached to the thread.
 
@@ -571,7 +486,7 @@ class QueryPipeline:
 
         return results
 
-    async def _rerank(self, queries: List[str], documents):
+    async def _rerank(self, queries: list[str], documents):
         """
         Rerank retrieved candidates when reranking is enabled in the pipeline config.
 
@@ -589,29 +504,13 @@ class QueryPipeline:
 
         anchor_query = self.message.content.strip() if getattr(self.message, "content", None) else ""
         rerank_queries = [anchor_query] if anchor_query else (queries or [""])
-        
+
         results = await asyncio.to_thread(rerank_documents, rerank_queries, documents, config)
 
         if self.run_manager:
             await self.run_manager.record_rerank(results)
 
         return results
-
-    async def _generate(self, query: str, context: str) -> str:
-        """
-        Generate a non-streaming answer using the configured LLM provider.
-        """
-        prompt = build_generation_prompt(
-            query,
-            context,
-            citation_enforced=self.thread_config.generation.citation_enforced,
-        )
-        return await self.executor.run(
-            "generation",
-            self.provider.ainvoke_safe(prompt),
-            input_data={"query": query, "context_length": len(context)},
-            config=self.thread_config.generation.model_dump(),
-        )
 
     async def _generate_stream(self, query: str, context: str):
         """
@@ -622,7 +521,7 @@ class QueryPipeline:
             context,
             citation_enforced=self.thread_config.generation.citation_enforced,
         )
-        
+
         async with self.executor.stream_step(
             "generation",
             input_data={"query": query, "context_length": len(context)},

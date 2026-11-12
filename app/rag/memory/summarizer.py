@@ -40,8 +40,8 @@ def resolve_summarizer_provider(
     """
     if settings.THREAD_SUMMARY_PROVIDER and settings.THREAD_SUMMARY_MODEL:
         try:
-            from app.schemas.thread import GenerationConfig
             from app.rag.generation.factory import provider_model_factory
+            from app.schemas.thread import GenerationConfig
 
             gen_config = GenerationConfig(
                 provider=settings.THREAD_SUMMARY_PROVIDER,

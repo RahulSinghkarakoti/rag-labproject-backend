@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -23,7 +22,7 @@ router = APIRouter(
 
 @router.get(
     "/projects/{project_id}/pipelines",
-    response_model=APIResponse[List[PipelineResponse]],
+    response_model=APIResponse[list[PipelineResponse]],
 )
 async def get_project_pipelines(
     project_id: UUID,
@@ -126,7 +125,7 @@ async def delete_pipeline(
 
 @router.get(
     "/pipelines/{pipeline_id}/versions",
-    response_model=APIResponse[List[PipelineVersionResponse]],
+    response_model=APIResponse[list[PipelineVersionResponse]],
 )
 async def get_pipeline_versions(
     pipeline_id: UUID,

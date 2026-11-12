@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.core.exceptions import ModelProviderError, sanitize_model_error
 from app.rag.generation.base import BaseGenerationProvider
@@ -7,10 +8,6 @@ from app.rag.query.base import clean_queries
 from app.rag.query.expander import MultiQueryExpander
 from app.rag.query.hyde import HyDETransformer
 from app.rag.query.passthrough import PassThroughTransformer
-from app.rag.query.processor import (
-    QueryTransformationProcessor,
-    query_transformation_processor,
-)
 from app.rag.query.rewriter import QueryRewriter
 from app.rag.query.step_back import StepBackTransformer
 from app.rag.query.sub_queries import SubQueryDecomposer
@@ -18,8 +15,6 @@ from app.rag.query.transformer import transform_query
 from app.schemas.thread import (
     GenerationConfig,
     QueryTransformationConfig,
-    RerankingConfig,
-    RetrievalConfig,
     ThreadConfig,
 )
 
@@ -316,6 +311,7 @@ def test_sanitize_model_error_model_not_found():
 async def test_query_pipeline_execution():
     from unittest.mock import MagicMock
     from uuid import uuid4
+
     from app.rag.pipeline.query import QueryPipeline
 
     provider = DummyProvider(canned_response="Rewritten: What is retrieval augmented generation?")
@@ -342,7 +338,9 @@ async def test_query_pipeline_execution():
         provider=provider,
     )
 
-    result = await pipeline.execute()
+    events = [e async for e in pipeline.execute_stream()]
+    complete_event = next(e for e in events if e["type"] == "complete")
+    result = complete_event["result"]
 
     assert result["original_query"] == "what is RAG?"
     assert result["transformation_mode"] == "rewrite"

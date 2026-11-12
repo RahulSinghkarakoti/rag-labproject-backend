@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class PipelineResponse(BaseModel):
     id: UUID
@@ -23,4 +25,4 @@ class PipelineVersionResponse(BaseModel):
 class PipelineVersionRequest(BaseModel):
     version: int | None = None
     config: dict
-    
+

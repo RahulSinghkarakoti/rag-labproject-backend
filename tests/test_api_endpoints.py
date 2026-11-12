@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from app.api.documents import get_document, get_knowledge_base_documents
+from app.api.documents import get_document
 from app.api.projects import get_project
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
@@ -130,6 +130,7 @@ async def test_get_document_not_found():
 
 def test_v1_mount_routes():
     from fastapi import FastAPI
+
     from app.api.router import register_routers
 
     app = FastAPI()

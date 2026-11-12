@@ -48,7 +48,7 @@ class CrossEncoderReranker(BaseReranker):
             max(scores[q_idx * num_docs + d_idx] for q_idx in range(len(queries)))
             for d_idx in range(num_docs)
         ]
-        ranked = sorted(zip(documents, best_scores), key=lambda item: item[1], reverse=True)
+        ranked = sorted(zip(documents, best_scores, strict=False), key=lambda item: item[1], reverse=True)
         if self.score_threshold is not None:
             ranked = [item for item in ranked if item[1] >= self.score_threshold]
         ranked = ranked[:self.top_k]

@@ -1,6 +1,7 @@
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.rag.pipeline.ingestion import IngestionPipeline
 
@@ -22,7 +23,7 @@ async def test_ingestion_pipeline():
 
     pipeline = IngestionPipeline(
         vector_store=mock_vector_store,
-        enbedder=mock_embedder,
+        embedder=mock_embedder,
     )
 
     chunks = await pipeline.process(Path("tests/data/sample.txt"))

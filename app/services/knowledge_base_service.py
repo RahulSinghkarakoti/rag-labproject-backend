@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -36,7 +35,7 @@ class KnowledgeBaseService:
 
     async def get_project_knowledge_bases(
         self, project_id: UUID, user_id: int
-    ) -> List[KnowledgeBaseResponse]:
+    ) -> list[KnowledgeBaseResponse]:
         await self.verify_project_ownership(project_id, user_id)
 
         stmt = (
@@ -50,7 +49,7 @@ class KnowledgeBaseService:
         )
         result = await self.db.execute(stmt)
 
-        enriched: List[KnowledgeBaseResponse] = []
+        enriched: list[KnowledgeBaseResponse] = []
         for kb, doc_count in result.all():
             kb_dto = KnowledgeBaseResponse.model_validate(kb)
             kb_dto.document_count = doc_count or 0
@@ -194,7 +193,7 @@ class KnowledgeBaseService:
 
     async def get_knowledge_base_documents(
         self, project_id: UUID, kb_id: UUID, user_id: int
-    ) -> List[Document]:
+    ) -> list[Document]:
         await self.verify_project_ownership(project_id, user_id)
         kb = await self.db.scalar(
             select(KnowledgeBase.id).where(

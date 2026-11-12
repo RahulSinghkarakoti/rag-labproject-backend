@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -10,13 +11,13 @@ class RunStepResponse(BaseModel):
     step_type: str
     sequence: int
     status: str
-    input: Optional[Any] = None
-    output: Optional[Any] = None
-    config: Optional[Any] = None
-    error: Optional[Any] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+    input: Any | None = None
+    output: Any | None = None
+    config: Any | None = None
+    error: Any | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -24,13 +25,13 @@ class RunStepResponse(BaseModel):
 class RunDetailsResponse(BaseModel):
     id: UUID
     thread_id: UUID
-    input_message_id: Optional[UUID] = None
-    output_message_id: Optional[UUID] = None
+    input_message_id: UUID | None = None
+    output_message_id: UUID | None = None
     run_type: str
     status: str
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    error: Optional[Any] = None
-    steps: List[RunStepResponse] = Field(default_factory=list)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: Any | None = None
+    steps: list[RunStepResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

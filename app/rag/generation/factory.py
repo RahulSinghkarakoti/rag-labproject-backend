@@ -1,12 +1,11 @@
 from collections.abc import Callable
 from typing import Any
 
-from app.schemas.thread import GenerationConfig
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.generation.gemini import GeminiProvider
 from app.rag.generation.groq import GroqProvider
 from app.rag.generation.openai import OpenAIProvider
-
+from app.schemas.thread import GenerationConfig
 
 ProviderClass = Callable[[GenerationConfig], BaseGenerationProvider]
 

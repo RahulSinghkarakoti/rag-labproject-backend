@@ -2,17 +2,12 @@
 
 import uuid
 
-from sqlalchemy import (
-    String,
-    Text,
-    BigInteger,
-    ForeignKey
-)
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import BigInteger, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, UUIDMixin, TimestampMixin
+from .base import Base, TimestampMixin, UUIDMixin
 
 
 class Document(Base, UUIDMixin, TimestampMixin):

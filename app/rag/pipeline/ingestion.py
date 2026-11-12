@@ -3,15 +3,16 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from app.rag.chunking import RecursiveChunker
-from app.rag.loaders import LoaderFactory
-from app.rag.embeddings import SentenceTransformerEmbedder
-from app.rag.vectorstore import PgVectorStore
 from app.core.sse import publisher
+from app.rag.chunking import RecursiveChunker
+from app.rag.embeddings import SentenceTransformerEmbedder
+from app.rag.loaders import LoaderFactory
+from app.rag.vectorstore import PgVectorStore
+
 
 class IngestionPipeline:
     """
-    Orchestrates the document ingestion workflow. 
+    Orchestrates the document ingestion workflow.
         File → Load → Chunk → Embed → Store
     """
 
@@ -19,22 +20,22 @@ class IngestionPipeline:
         self,
         loader_factory: LoaderFactory | None = None,
         chunker: RecursiveChunker | None = None,
-        enbedder: SentenceTransformerEmbedder | None = None,
-        vector_store: PgVectorStore | None = None, 
+        embedder: SentenceTransformerEmbedder | None = None,
+        vector_store: PgVectorStore | None = None,
         document_id: str | None = None,
         metadata: dict | None = None,
         sse_channel: str = "ingestion_channel",
     ):
         self.loader_factory = loader_factory or LoaderFactory()
         self.chunker = chunker or RecursiveChunker()
-        self.embedder = enbedder 
+        self.embedder = embedder
         self.vector_store = vector_store
 
         self.document_id = document_id
-        self.metadata = metadata or {} 
+        self.metadata = metadata or {}
         self.sse_channel = sse_channel
 
-    
+
     async def process(
         self,
         file_path: str | Path,
@@ -44,7 +45,7 @@ class IngestionPipeline:
         await sendSSE(data={
                     "document_id": self.document_id,
                     "message": "Document loading",
-                    "status": "loading", 
+                    "status": "loading",
                     "file_path": str(file_path)
                     }, event="ingestion_status", channel=self.sse_channel)
         documents = await asyncio.to_thread(self.loader_factory.load, file_path)

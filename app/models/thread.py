@@ -2,18 +2,11 @@
 
 import uuid
 
-from datetime import datetime
-
-from sqlalchemy import (
-    String,
-    ForeignKey,
-    DateTime,
-    Index,Text
-)
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, UUIDMixin, TimestampMixin
+from .base import Base, TimestampMixin, UUIDMixin
 
 
 class Thread(Base, UUIDMixin, TimestampMixin):
@@ -104,7 +97,7 @@ class Thread(Base, UUIDMixin, TimestampMixin):
         ),
     )
 
-    
+
 class ThreadSummary(Base, UUIDMixin):
     __tablename__ = "thread_summaries"
 

@@ -48,8 +48,8 @@ class ChunkerFactory:
 
         elif normalized_strategy == "semantic" and normalized_file_type == "csv":
             logger.warning(
-                f"Strategy 'semantic' is not optimal for tabular file type 'csv'. "
-                f"Falling back to 'recursive' strategy."
+                "Strategy 'semantic' is not optimal for tabular file type 'csv'. "
+                "Falling back to 'recursive' strategy."
             )
             normalized_strategy = "recursive"
 

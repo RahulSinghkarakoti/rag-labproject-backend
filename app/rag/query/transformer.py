@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.query.processor import query_transformation_processor
@@ -10,7 +10,7 @@ async def transform_query(
     provider: BaseGenerationProvider,
     config: QueryTransformationConfig | dict | None = None,
     memory: Any = None,
-) -> List[str]:
+) -> list[str]:
     """
     Transforms the query into one or more retrieval queries using the configured technique.
     Delegates to the modular QueryTransformationProcessor.

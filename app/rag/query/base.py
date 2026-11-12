@@ -1,12 +1,12 @@
 import re
 from abc import ABC, abstractmethod
-from typing import Any, List
+from typing import Any
 
 from app.rag.generation.base import BaseGenerationProvider
 from app.schemas.thread import QueryTransformationConfig
 
 
-def clean_queries(raw_text: str, max_count: int = 5, fallback_query: str = "") -> List[str]:
+def clean_queries(raw_text: str, max_count: int = 5, fallback_query: str = "") -> list[str]:
     """
     Cleans raw LLM response text into a list of clean, distinct search queries.
     Strips numbering, bullets, quotes, and conversational preamble.
@@ -69,7 +69,7 @@ class BaseQueryTransformer(ABC):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Transforms the input query into one or more retrieval query strings.
         """

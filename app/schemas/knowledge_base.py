@@ -1,7 +1,9 @@
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from app.core.model_config import validate_embedding_model
 
 
@@ -33,17 +35,17 @@ class EmbeddingConfig(BaseModel):
 
 class KnowledgeBaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    chunking_config: Optional[ChunkingConfig] = None
-    embedding_config: Optional[EmbeddingConfig] = None
+    description: str | None = None
+    chunking_config: ChunkingConfig | None = None
+    embedding_config: EmbeddingConfig | None = None
     # indexing_config: Optional[IndexingConfig] = None
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    chunking_config: Optional[ChunkingConfig] = None
-    embedding_config: Optional[EmbeddingConfig] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = None
+    chunking_config: ChunkingConfig | None = None
+    embedding_config: EmbeddingConfig | None = None
     # indexing_config: Optional[IndexingConfig] = None
 
 
@@ -51,12 +53,12 @@ class KnowledgeBaseResponse(BaseModel):
     id: UUID
     project_id: UUID
     name: str
-    description: Optional[str] = None
-    chunking_config: Dict[str, Any] = Field(default_factory=dict)
-    embedding_config: Dict[str, Any] = Field(default_factory=dict)
-    indexing_config: Dict[str, Any] = Field(default_factory=dict)
-    document_count: Optional[int] = 0
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    description: str | None = None
+    chunking_config: dict[str, Any] = Field(default_factory=dict)
+    embedding_config: dict[str, Any] = Field(default_factory=dict)
+    indexing_config: dict[str, Any] = Field(default_factory=dict)
+    document_count: int | None = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Type
+from typing import Any
 
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.query.base import BaseQueryTransformer
@@ -18,7 +18,7 @@ class QueryTransformationProcessor:
     """
 
     def __init__(self):
-        self._transformers: Dict[str, BaseQueryTransformer] = {
+        self._transformers: dict[str, BaseQueryTransformer] = {
             "none": PassThroughTransformer(),
             "rewrite": QueryRewriter(),
             "hyde": HyDETransformer(),
@@ -45,7 +45,7 @@ class QueryTransformationProcessor:
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig | dict | None = None,
         memory: Any = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Executes query transformation using the configured technique.
         Returns a list of search query strings.

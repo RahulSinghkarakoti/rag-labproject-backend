@@ -1,5 +1,7 @@
+import asyncio
 from collections import defaultdict
 
+from app.rag.embeddings import SentenceTransformerEmbedder
 from app.rag.retrieval.dense import retrieve_dense
 from app.rag.retrieval.fusion import weighted_fusion
 from app.rag.retrieval.mmr import maximal_marginal_relevance
@@ -15,10 +17,10 @@ class RetrievalWorkflow:
 
 
     async def retrieve(self, queries: list[str], knowledge_bases: list, config):
-        """Retrieve relevant documents using dense, sparse, hybrid, or MMR.""" 
+        """Retrieve relevant documents using dense, sparse, hybrid, or MMR."""
         if not queries or not knowledge_bases:
             return []
- 
+
         # 1. Group Knowledge Bases by embedding model
         by_model = defaultdict(list)
         for kb in knowledge_bases:
@@ -36,16 +38,13 @@ class RetrievalWorkflow:
                     unique[doc_id] = (document, score)
             return list(unique.values())
         for model, knowledge_base_ids in by_model.items():
-            from app.rag.embeddings import SentenceTransformerEmbedder
-            import asyncio
-
             embedder = SentenceTransformerEmbedder(model_name=model)
             filters = {"knowledge_base_id": knowledge_base_ids}
             # Gather candidates across ALL queries before selecting final results.
             all_dense = []
             all_sparse = []
-            
-            async def process_query(query):
+
+            async def process_query(query, emb=embedder, flt=filters):
                 res_dense = []
                 res_sparse = []
                 # 2. Dense retrieval
@@ -57,10 +56,10 @@ class RetrievalWorkflow:
                     )
                     dense_results = await retrieve_dense(
                         self.vector_store,
-                        embedder,
+                        emb,
                         query,
                         top_k=fetch_k,
-                        filters=filters,
+                        filters=flt,
                     )
 
                     if config.similarity_threshold is not None:
@@ -69,7 +68,7 @@ class RetrievalWorkflow:
                             for doc, score in dense_results
                             if score >= config.similarity_threshold
                         ]
- 
+
                     res_dense.extend(dense_results)
                 # 3. Sparse retrieval
                 if strategy in {"sparse", "hybrid"}:
@@ -78,7 +77,7 @@ class RetrievalWorkflow:
                         query,
                         model=config.sparse_model,
                         top_k=config.top_k,
-                        filters=filters,
+                        filters=flt,
                     )
                     res_sparse.extend(sparse_results)
                 return res_dense, res_sparse
@@ -90,7 +89,7 @@ class RetrievalWorkflow:
             # 4. Deduplicate candidates across queries
             all_dense = deduplicate_scored(all_dense)
             all_sparse = deduplicate_scored(all_sparse)
- 
+
             # 5. Apply the selected strategy globally across these queries
             if strategy == "dense":
                 selected = []
@@ -139,5 +138,5 @@ class RetrievalWorkflow:
         for document in documents:
             unique.setdefault(str(document.id), document)
         final_documents = list(unique.values())[:config.top_k]
- 
+
         return final_documents

@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
@@ -21,7 +20,7 @@ from app.services.chat_service import ChatService
 router = APIRouter(tags=["Threads"])
 
 
-@router.get("/projects/{project_id}/threads", response_model=APIResponse[List[ThreadResponse]])
+@router.get("/projects/{project_id}/threads", response_model=APIResponse[list[ThreadResponse]])
 async def get_project_threads(
     project_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -133,7 +132,7 @@ async def delete_thread(
 
 @router.get(
     "/threads/{thread_id}/messages",
-    response_model=APIResponse[List[MessageResponse]],
+    response_model=APIResponse[list[MessageResponse]],
 )
 async def get_thread_messages(
     thread_id: UUID,

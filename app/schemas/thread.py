@@ -1,14 +1,16 @@
 # app/schemas/thread.py (or inside app/api/threads.py)
-from typing import Any, Dict, Optional, List, Literal
+from datetime import datetime
+from typing import Any, Literal
+from uuid import UUID
+
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from app.core.model_config import (
     validate_embedding_model,
     validate_generation_model,
     validate_reranking_model,
 )
 from app.schemas.knowledge_base import KnowledgeBaseResponse
-from uuid import UUID
-from datetime import datetime
 
 
 class QueryTransformationConfig(BaseModel):
@@ -30,12 +32,12 @@ class QueryTransformationConfig(BaseModel):
         default=True,
         description="Whether to include the original user query alongside transformed queries",
     )
-    prompt_template: Optional[str] = Field(
+    prompt_template: str | None = Field(
         default=None,
         description="Optional custom prompt instructions for the transformation technique",
     )
 
-     
+
 
     model_config = ConfigDict(extra="forbid")
 
@@ -147,31 +149,31 @@ class ThreadConfig(BaseModel):
 
 class ThreadCreate(BaseModel):
     title: str
-    knowledge_base_ids: List[UUID] = Field(default_factory=list)
-    config: Optional[ThreadConfig] = None
+    knowledge_base_ids: list[UUID] = Field(default_factory=list)
+    config: ThreadConfig | None = None
 
-class ThreadUpdate(BaseModel): 
-    title: Optional[str] = Field(None, min_length=1, max_length=500)
-    knowledge_base_ids: Optional[List[UUID]] = None
-    config: Optional[ThreadConfig] = None
+class ThreadUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=500)
+    knowledge_base_ids: list[UUID] | None = None
+    config: ThreadConfig | None = None
 
 class ThreadResponse(BaseModel):
     id: UUID
     user_id: int
-    project_id: Optional[UUID]
-    title: Optional[str]
+    project_id: UUID | None
+    title: str | None
     status: str
-    knowledge_bases: List[KnowledgeBaseResponse] = Field(default_factory=list)
-    metadata: Optional[dict] = None
+    knowledge_bases: list[KnowledgeBaseResponse] = Field(default_factory=list)
+    metadata: dict | None = None
     created_at: datetime
-    updated_at: datetime  
-    metadata: Optional[dict] = Field(default=None, validation_alias="metadata_")
+    updated_at: datetime
+    metadata: dict | None = Field(default=None, validation_alias="metadata_")
     model_config = ConfigDict(from_attributes=True)
 
 class MessageCreate(BaseModel):
-    content: Optional[str] = None
-    message_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    content: str | None = None
+    message_id: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class MessageResponse(BaseModel):
@@ -183,6 +185,6 @@ class MessageResponse(BaseModel):
     content_json: Any | None = None
     sequence: int
     status: str
-    metadata: Dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
 
     model_config = ConfigDict(from_attributes=True)

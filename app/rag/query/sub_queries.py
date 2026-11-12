@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 from langchain_core.prompts import PromptTemplate
 
@@ -27,7 +27,7 @@ class SubQueryDecomposer(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
-    ) -> List[str]:
+    ) -> list[str]:
         stripped = query.strip()
         if not stripped:
             return []

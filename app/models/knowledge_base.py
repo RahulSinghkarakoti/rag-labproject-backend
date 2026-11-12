@@ -2,11 +2,11 @@
 
 import uuid
 
-from sqlalchemy import String, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, UUIDMixin, TimestampMixin
+from .base import Base, TimestampMixin, UUIDMixin
 
 
 class KnowledgeBase(Base, UUIDMixin, TimestampMixin):

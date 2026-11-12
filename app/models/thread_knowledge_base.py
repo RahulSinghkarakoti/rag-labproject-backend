@@ -1,10 +1,9 @@
 # app/models/thread_knowledge_base.py
 
-from sqlalchemy import Table, Column, ForeignKey
+from sqlalchemy import Column, ForeignKey, Table
 from sqlalchemy.dialects.postgresql import UUID
 
 from .base import Base
-
 
 thread_knowledge_bases = Table(
     "thread_knowledge_bases",

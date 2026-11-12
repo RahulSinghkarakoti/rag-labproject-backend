@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -31,7 +30,7 @@ class PipelineService:
 
     async def get_project_pipelines(
         self, project_id: UUID, user_id: int
-    ) -> List[Pipeline]:
+    ) -> list[Pipeline]:
         await self.verify_project_ownership(project_id, user_id)
         stmt = select(Pipeline).where(
             Pipeline.project_id == project_id,
@@ -85,7 +84,7 @@ class PipelineService:
 
     async def get_pipeline_versions(
         self, pipeline_id: UUID, user_id: int
-    ) -> List[PipelineVersion]:
+    ) -> list[PipelineVersion]:
         await self.get_pipeline(pipeline_id, user_id)
         stmt = select(PipelineVersion).where(
             PipelineVersion.pipeline_id == pipeline_id

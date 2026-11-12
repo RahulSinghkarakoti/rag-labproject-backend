@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.rag.pipeline.query import QueryPipeline
 from app.rag.generation.base import BaseGenerationProvider
+from app.rag.pipeline.query import QueryPipeline
 
 
 class RecordingProvider(BaseGenerationProvider):
@@ -49,7 +49,9 @@ async def test_query_pipeline_generates_from_queries_documents_and_memory():
 
     pipeline.memory_manager.load = memory
 
-    result = await pipeline.execute()
+    events = [e async for e in pipeline.execute_stream()]
+    complete_event = next(e for e in events if e["type"] == "complete")
+    result = complete_event["result"]
 
     assert result["response"] == "generated answer"
     assert "What is RAG?" in provider.prompts[0]

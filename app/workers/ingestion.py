@@ -2,17 +2,18 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from app.core.model_config import validate_embedding_model
 from app.core.sse import publisher
 from app.database.database import AsyncSessionLocal
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
-from app.core.model_config import validate_embedding_model
-from app.rag.pipeline.ingestion import IngestionPipeline
 from app.rag.chunking import ChunkerFactory
+from app.rag.embeddings import SentenceTransformerEmbedder
 from app.rag.loaders import LoaderFactory
 from app.rag.loaders.detector import FileTypeDetector
+from app.rag.pipeline.ingestion import IngestionPipeline
 from app.rag.vectorstore import PgVectorStore
-from app.rag.embeddings import SentenceTransformerEmbedder
+
 
 async def ingest_document(ctx: dict, document_id: str):
     async with AsyncSessionLocal() as db:
@@ -71,7 +72,7 @@ async def ingest_document(ctx: dict, document_id: str):
             pipeline = IngestionPipeline(
                 loader_factory=loader,
                 chunker=chunker,
-                enbedder=embedder,
+                embedder=embedder,
                 vector_store=vector_store,
                 document_id=document_id,
                 sse_channel=user_channel,

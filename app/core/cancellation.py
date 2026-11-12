@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from typing import Dict
 from uuid import UUID
 
 from app.core.redis import get_redis_pool
@@ -12,7 +11,7 @@ class CancellationManager:
     """Coordinates in-process and distributed cancellation signals for RAG runs."""
 
     def __init__(self) -> None:
-        self._events: Dict[str, asyncio.Event] = {}
+        self._events: dict[str, asyncio.Event] = {}
 
     def register(self, run_id: str | UUID) -> asyncio.Event:
         """Register an active run and return its cancellation Event."""

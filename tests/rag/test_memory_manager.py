@@ -1,12 +1,12 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
+import pytest
 
 from app.models.message import Message
 from app.models.thread import Thread, ThreadSummary
 from app.rag.memory.context import build_rag_context, estimate_context_tokens, get_context_metrics
 from app.rag.memory.manager import MemoryManager
-from app.rag.memory.summarizer import ThreadSummarizer
 
 
 @pytest.mark.anyio

@@ -5,11 +5,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.models.document import DocumentChunk
-from app.rag.vectorstore.base import BaseVectorStore
-
 from app.models.document import Document, DocumentChunk
 from app.models.knowledge_base import KnowledgeBase
+from app.rag.vectorstore.base import BaseVectorStore
+
 
 class PgVectorStore(BaseVectorStore):
 
@@ -41,7 +40,7 @@ class PgVectorStore(BaseVectorStore):
 
         batch_size = 100
         for index, (document, embedding) in enumerate(
-            zip(documents, embeddings)
+            zip(documents, embeddings, strict=False)
         ):
             doc_metadata = metadata[index] if metadata else {}
 
@@ -71,7 +70,7 @@ class PgVectorStore(BaseVectorStore):
             )
 
             chunks.append(chunk)
-            
+
             if len(chunks) >= batch_size:
                 self.db.add_all(chunks)
                 await self.db.flush()
@@ -176,7 +175,7 @@ class PgVectorStore(BaseVectorStore):
             stmt = stmt.where(Document.knowledge_base_id.in_([uuid.UUID(str(value)) for value in ids]))
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def delete_document(
         self,
         document_id: str,

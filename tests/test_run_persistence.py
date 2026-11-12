@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.models.message import Message
-from app.models.run import Run, RunStep, ModelCall
+from app.models.run import Run
 from app.rag.engine import QueryEngine
 
 

@@ -1,12 +1,13 @@
 import logging
 import os
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from dotenv import load_dotenv 
 load_dotenv()
 
 from app.core.config import settings
+
 if getattr(settings, "HF_TOKEN", None) and "HF_TOKEN" not in os.environ:
     os.environ["HF_TOKEN"] = settings.HF_TOKEN
 

@@ -1,6 +1,6 @@
 # Document Ingestion Pipeline Flow
 
-The **Ingestion Pipeline** handles raw document processing, text extraction, chunking, vector embedding, and storage into PostgreSQL using `pgvector`. It also provides real-time SSE progress updates to the client.
+The **Document Ingestion Pipeline** processes raw files uploaded to a Knowledge Base. It handles file type detection, content extraction, chunking strategy resolution, vector embedding generation, PostgreSQL `pgvector` persistence, and real-time Server-Sent Events (SSE) status publishing.
 
 ---
 
@@ -8,44 +8,44 @@ The **Ingestion Pipeline** handles raw document processing, text extraction, chu
 
 ```mermaid
 flowchart TD
-    Start(["📄 Document Upload API Trigger"]) --> Step1["1. DB Record Creation<br/>Document status = 'pending'"]
+    Start(["📄 Document Upload API (/api/v1/documents)"]) --> Step1["1. DB Record Creation<br/>Document status = 'pending'"]
     Step1 --> Step2["2. Dispatch Async Worker Task<br/>ingest_document(ctx, document_id)"]
-    
+
     subgraph Worker ["Worker Task Context (app/workers/ingestion.py)"]
-        Step2 --> FetchDoc["Fetch Document & KB from DB"]
-        FetchDoc --> MarkProcessing["Mark Document status = 'processing'<br/>Publish SSE event: status='processing'"]
+        Step2 --> FetchDoc["Fetch Document & Parent KnowledgeBase (with row lock)"]
+        FetchDoc --> MarkProcessing["Mark Document status = 'processing'<br/>Publish SSE: status='processing' on user channel"]
         
         subgraph Pipeline ["IngestionPipeline Orchestrator (app/rag/pipeline/ingestion.py)"]
             MarkProcessing --> LoadStage["3. Document Loading Stage"]
-            LoadStage --> DetectType["FileTypeDetector.detect(storage_path)"]
-            DetectType --> LoadFile["LoaderFactory.load(storage_path)"]
-            LoadFile --> SanitizeText["Sanitize NUL bytes ('\x00' -> '')"]
-            SanitizeText --> SSELoaded["Publish SSE: status='loaded'"]
-            
+            LoadStage --> DetectType["FileTypeDetector.detect(storage_path)<br/>(Identifies pdf, text, or csv)"]
+            DetectType --> LoadFile["LoaderFactory.load(storage_path)<br/>(PDFLoader, TextFileLoader, or CSVFileLoader)"]
+            LoadFile --> SanitizeText["Sanitize NUL bytes ('\x00' -> '') for PostgreSQL compatibility"]
+            SanitizeText --> SSELoaded["Publish SSE: status='loading' -> status='loaded'"]
+
             SSELoaded --> ChunkStage["4. Document Chunking Stage"]
-            ChunkStage --> InitChunker["ChunkerFactory.create(<br/>strategy, chunk_size, chunk_overlap<br/>)"]
+            ChunkStage --> InitChunker["ChunkerFactory.create(<br/>strategy, chunk_size, chunk_overlap, file_type, embedder<br/>)<br/>(Supports recursive, character, markdown, semantic)"]
             InitChunker --> SplitDocs["chunker.split(documents)"]
-            SplitDocs --> SSEChunked["Publish SSE: status='chunked'"]
-            
+            SplitDocs --> SSEChunked["Publish SSE: status='chunking' -> status='chunked'"]
+
             SSEChunked --> EmbedStage["5. Document Embedding Stage"]
-            EmbedStage --> InitEmbedder["SentenceTransformerEmbedder(model_name)"]
-            InitEmbedder --> BatchLoop{"Batch Chunks (size=16)"}
+            EmbedStage --> InitEmbedder["SentenceTransformerEmbedder(model_name)<br/>(Validated via validate_embedding_model)"]
+            InitEmbedder --> BatchLoop{"Batch Chunks (batch_size = 16)"}
             BatchLoop -->|Process Batch| EmbedBatch["embedder.embed_documents(batch)"]
-            EmbedBatch --> SSEBatch["Publish SSE: status='embedding' (progress)"]
+            EmbedBatch --> SSEBatch["Publish SSE: status='embedding'<br/>(progress: embedded_count / total_chunks)"]
             SSEBatch --> BatchLoop
             BatchLoop -->|All Batches Complete| SSEEmbedded["Publish SSE: status='embedded'"]
-            
-            SSEEmbedded --> StoreStage["6. Vector Store Stage"]
-            StoreStage --> PgVector["PgVectorStore.add_documents(<br/>chunks, embeddings, metadata<br/>)"]
-            PgVector --> SSEStored["Publish SSE: status='stored'"]
+
+            SSEEmbedded --> StoreStage["6. Vector Persistence Stage"]
+            StoreStage --> PgVector["PgVectorStore.add_documents(<br/>chunks, embeddings, metadata, document_id<br/>)"]
+            PgVector --> SSEStored["Publish SSE: status='storing' -> status='stored'"]
         end
 
         SSEStored --> MarkCompleted["7. Mark Document status = 'completed'<br/>Publish SSE: status='completed'"]
     end
 
-    subgraph ErrorHandling ["Error Handling"]
-        Pipeline -->|Exception Occurs| Rollback["DB Rollback"]
-        Rollback --> MarkFailed["Mark Document status = 'failed'<br/>Publish SSE: status='failed'"]
+    subgraph ErrorHandling ["Error Handling & Rollback"]
+        Pipeline -->|Exception Occurs| Rollback["DB Transaction Rollback"]
+        Rollback --> MarkFailed["Mark Document status = 'failed'<br/>Publish SSE: status='failed' with error details"]
     end
 
     MarkCompleted --> End(["✅ Ingestion Completed"])
@@ -58,44 +58,54 @@ flowchart TD
 
 ### 1. Document Upload & Task Dispatch
 - **Endpoint**: [`POST /api/v1/documents`](../app/api/documents.py)
-- **Action**: Validates user upload, writes raw file to storage, creates a database record with `status="pending"`, and dispatches the background task to the ingestion worker.
+- **Action**: Validates file payload, writes uploaded file to disk storage, creates a database `Document` record with `status="pending"`, and dispatches the background ingestion task.
 
-### 2. Worker Initialization & DB Context
+### 2. Worker Initialization & Lock
 - **Module**: [`app/workers/ingestion.py`](../app/workers/ingestion.py)
 - **Action**: 
-  - Retrieves the `Document` and parent `KnowledgeBase` configuration (embedding model, chunking parameters).
-  - Updates status to `processing`.
-  - Emits SSE event: `ingestion_status` with `status: "processing"`.
+  - Retrieves the `Document` with a row-level DB lock (`with_for_update()`) and resolves its parent `KnowledgeBase`.
+  - Determines the target SSE channel (`ingestion_channel:{user_id}` or `ingestion_channel`).
+  - Updates document status to `processing` and emits SSE event `ingestion_status` (`status: "processing"`).
 
 ### 3. File Type Detection & Loading
-- **Module**: [`app/rag/loaders/`](../app/rag/loaders/)
+- **Modules**: [`app/rag/loaders/detector.py`](../app/rag/loaders/detector.py), [`app/rag/loaders/factory.py`](../app/rag/loaders/factory.py), [`app/rag/loaders/registry.py`](../app/rag/loaders/registry.py)
 - **Action**:
-  - `FileTypeDetector` inspects file extension/MIME type.
-  - `LoaderFactory` instantiates appropriate loader (`PDFLoader`, `DocxLoader`, `TextLoader`, etc.).
-  - Extracts text content and sanitizes NULL bytes (`\x00`) to prevent PostgreSQL text column errors.
-  - Emits SSE event: `status: "loaded"`.
+  - `FileTypeDetector` inspects the file extension / MIME type to classify the format (`pdf`, `text`, or `csv`).
+  - `LoaderFactory` fetches the registered loader (`PDFLoader`, `TextFileLoader`, or `CSVFileLoader`) from `LoaderRegistry`.
+  - Content is extracted into LangChain `Document` objects and sanitized by stripping NUL bytes (`\x00`) to prevent PostgreSQL text column errors.
+  - Emits SSE status events: `loading` followed by `loaded` (with total `document_count`).
 
-### 4. Text Chunking
-- **Module**: [`app/rag/chunking/`](../app/rag/chunking/)
+### 4. Text Chunking & Strategy Resolution
+- **Modules**: [`app/rag/chunking/factory.py`](../app/rag/chunking/factory.py), [`app/rag/chunking/splitter.py`](../app/rag/chunking/splitter.py)
 - **Action**:
-  - `ChunkerFactory` instantiates configured strategy (e.g. `RecursiveChunker`, `SemanticChunker`, `TokenChunker`).
-  - Splits loaded documents into chunks based on `chunk_size` and `chunk_overlap`.
-  - Emits SSE event: `status: "chunked"`.
+  - `ChunkerFactory` evaluates the Knowledge Base `chunking_config` (`strategy`, `chunk_size`, `chunk_overlap`) against document type compatibility rules.
+  - Supported strategies:
+    - `recursive`: `RecursiveChunker` (default, standard text/PDF hierarchy).
+    - `character`: `CharacterChunker` (separator-based splitting).
+    - `markdown`: `MarkdownChunker` (header-aware structure splitting).
+    - `semantic`: `SemanticChunker` (embedding-based semantic breakpoint splitting).
+  - Validates compatibility (e.g. falls back to `recursive` if `markdown` or `semantic` strategies are incompatible with tabular `csv`).
+  - Emits SSE status events: `chunking` followed by `chunked` (with total `chunk_count`).
 
 ### 5. Vector Embedding Generation
-- **Module**: [`app/rag/embeddings/sentence_transformer.py`](../app/rag/embeddings/sentence_transformer.py)
+- **Modules**: [`app/rag/embeddings/sentence_transformer.py`](../app/rag/embeddings/sentence_transformer.py), [`app/core/model_config.py`](../app/core/model_config.py)
 - **Action**:
-  - `SentenceTransformerEmbedder` processes chunks in batches (default `batch_size = 16`).
-  - Emits progress SSE events for each batch (`embedded_count` / `total_chunks`).
-  - Emits SSE event: `status: "embedded"`.
+  - Validates requested embedding model via `validate_embedding_model()`.
+  - Instantiates `SentenceTransformerEmbedder` for the Knowledge Base model configuration (e.g. `all-MiniLM-L6-v2`).
+  - Processes chunk text in batches (`batch_size = 16`).
+  - Emits SSE progress notifications per batch (`embedded_count` / `total_chunks`) and final `embedded` event.
 
-### 6. PgVector Database Persistence
+### 6. Vector Store & Rich Metadata Persistence
 - **Module**: [`app/rag/vectorstore/pgvector.py`](../app/rag/vectorstore/pgvector.py)
 - **Action**:
-  - Inserts vector embeddings, chunk text, and rich metadata into PostgreSQL `vector` table.
-  - Attached Metadata includes: `filename`, `file_type`, `size_bytes`, `knowledge_base_id`, `embedding_model`, `embedding_dimension`, `chunking_strategy`, and `chunking_config`.
-  - Emits SSE event: `status: "stored"`.
+  - Inserts document chunks, vector embeddings, and metadata into PostgreSQL using `pgvector`.
+  - Attaches rich chunk metadata:
+    - `filename`, `type` (MIME type), `file_type`, `size_bytes`, `storage_path`
+    - `knowledge_base_id`, `embedding_model`, `embedding_dimension`
+    - `chunking_strategy`, `chunking_config`
+  - Emits SSE status events: `storing` followed by `stored`.
 
-### 7. Completion & SSE Event Stream
-- Updates database document record `status="completed"`.
-- Emits final SSE event `status: "completed"`.
+### 7. Completion & SSE Notification Stream
+- Updates database `Document` status to `completed`.
+- Emits final SSE event `ingestion_status` (`status: "completed"`).
+- In case of failure: rolls back DB transaction, sets `status = "failed"`, and emits SSE event with the exception error message.

@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile
@@ -18,7 +17,7 @@ router = APIRouter(
 
 @router.get(
     "/projects/{project_id}/knowledge-bases/{kb_id}/documents",
-    response_model=APIResponse[List[DocumentResponse]],
+    response_model=APIResponse[list[DocumentResponse]],
 )
 async def get_knowledge_base_documents(
     project_id: UUID,
@@ -71,7 +70,7 @@ async def get_document(
 async def upload_multiple_files(
     project_id: UUID,
     kb_id: UUID,
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

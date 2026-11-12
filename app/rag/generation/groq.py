@@ -1,4 +1,5 @@
-from app.rag.generation.base import BaseGenerationProvider 
+from app.rag.generation.base import BaseGenerationProvider
+
 
 class GroqProvider(BaseGenerationProvider):
     provider_name = "groq"

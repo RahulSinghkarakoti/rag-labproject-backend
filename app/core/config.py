@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     REDIS_HOST:str
     REDIS_PORT:int
-    
+
     HF_TOKEN:str
 
     # Model Preloading Configuration

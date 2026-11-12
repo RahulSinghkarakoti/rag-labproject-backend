@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.query.base import BaseQueryTransformer
@@ -16,6 +16,6 @@ class PassThroughTransformer(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
-    ) -> List[str]:
+    ) -> list[str]:
         stripped = query.strip()
         return [stripped] if stripped else []

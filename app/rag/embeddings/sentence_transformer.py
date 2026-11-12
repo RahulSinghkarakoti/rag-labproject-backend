@@ -1,10 +1,11 @@
 import sys
 from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from sentence_transformers import SentenceTransformer
 
-from app.rag.embeddings.base import BaseEmbedder
+if TYPE_CHECKING:
+    pass
+
 from app.core.model_config import SUPPORTED_EMBEDDING_MODELS
+from app.rag.embeddings.base import BaseEmbedder
 from app.rag.model_registry import ModelRegistry
 
 

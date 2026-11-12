@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -23,7 +22,7 @@ router = APIRouter(
 
 @router.get(
     "/projects/{project_id}/knowledge-bases",
-    response_model=APIResponse[List[KnowledgeBaseResponse]],
+    response_model=APIResponse[list[KnowledgeBaseResponse]],
 )
 async def get_project_knowledge_bases(
     project_id: UUID,

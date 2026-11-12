@@ -1,5 +1,5 @@
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -17,7 +17,7 @@ def resolve_preload_models(
     preload_all: bool = False,
 ) -> list[str]:
     """Resolve which models to preload based on environment settings.
-    
+
     - If preload_all is True: returns all supported models.
     - If configured_value is "all": returns all supported models.
     - If configured_value is "none", empty, or None: returns empty list (deferred to lazy loading).

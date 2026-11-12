@@ -1,19 +1,16 @@
 import asyncio
-from datetime import datetime, timezone
 import json
 import logging
-from typing import List, Tuple
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.cancellation import cancellation_manager
 from app.core.sse import create_sse_response
-
-logger = logging.getLogger(__name__)
 from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
@@ -22,6 +19,8 @@ from app.models.project import Project
 from app.models.thread import Thread
 from app.rag import QueryEngine
 from app.rag.run_manager import RunManager
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -45,8 +44,8 @@ class ChatService:
         return thread
 
     async def validate_knowledge_bases(
-        self, project_id: UUID, user_id: int, kb_ids: List[UUID]
-    ) -> Tuple[List[UUID], List[KnowledgeBase]]:
+        self, project_id: UUID, user_id: int, kb_ids: list[UUID]
+    ) -> tuple[list[UUID], list[KnowledgeBase]]:
         """Validate that all supplied knowledge bases exist, belong to the user/project,
 
         and contain at least one document.
@@ -82,7 +81,7 @@ class ChatService:
         project_id: UUID,
         user_id: int,
         title: str,
-        kb_ids: List[UUID],
+        kb_ids: list[UUID],
         config: dict | None,
     ) -> Thread:
         """Create a new thread along with its associated pipeline and version."""
@@ -235,7 +234,7 @@ class ChatService:
                     return user_message
                 else:
                     # Target is a human message: create a new branch message
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
                     user_message = Message(
                         thread_id=thread.id,
                         role="human",
@@ -276,7 +275,7 @@ class ChatService:
         )
         parent_id = last_assistant_message.id if last_assistant_message else None
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_message = Message(
             thread_id=thread.id,
             role="human",
@@ -312,7 +311,7 @@ class ChatService:
                 detail="Only user messages can be edited",
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         user_message = Message(
             thread_id=thread.id,
             role="human",
@@ -456,12 +455,13 @@ class ChatService:
                     from app.database.database import AsyncSessionLocal
                     p_text = getattr(run, "_partial_text", "").strip()
                     async with AsyncSessionLocal() as session:
-                        from app.models.run import Run as RunModel, RunStep as RunStepModel
                         from app.models.message import Message as MessageModel
+                        from app.models.run import Run as RunModel
+                        from app.models.run import RunStep as RunStepModel
                         c_run = await session.get(RunModel, run_id)
                         if c_run and c_run.status != "completed":
                             c_run.status = "cancelled"
-                            c_run.completed_at = datetime.now(timezone.utc)
+                            c_run.completed_at = datetime.now(UTC)
                             c_run.error = {"code": "CANCELLED", "message": "User interrupted this response."}
 
                             # Also cancel any running steps for this run in DB
@@ -537,7 +537,7 @@ class ChatService:
 
     async def get_project_threads(
         self, project_id: UUID, user_id: int
-    ) -> List[Thread]:
+    ) -> list[Thread]:
         """Fetch all threads for a project after verifying project ownership."""
         if not await self.db.scalar(
             select(Project.id).where(
@@ -567,7 +567,7 @@ class ChatService:
         thread_id: UUID,
         user_id: int,
         title: str | None = None,
-        knowledge_base_ids: List[UUID] | None = None,
+        knowledge_base_ids: list[UUID] | None = None,
         config: dict | None = None,
     ) -> Thread:
         """Update thread metadata, associated knowledge bases, and pipeline config."""
@@ -597,7 +597,7 @@ class ChatService:
 
     async def get_thread_messages(
         self, thread_id: UUID, user_id: int
-    ) -> List[Message]:
+    ) -> list[Message]:
         """Fetch all messages for a thread ordered by sequence and creation."""
         await self.get_thread(thread_id, user_id)
         messages = (

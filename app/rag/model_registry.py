@@ -1,7 +1,8 @@
 """Process-local registry for heavyweight embedding and reranking models."""
 
+from collections.abc import Callable
 from threading import RLock
-from typing import Any, Callable
+from typing import Any
 
 
 class ModelRegistry:
@@ -14,8 +15,9 @@ class ModelRegistry:
         with cls._lock:
             if model_name not in cls.embedding_models:
                 if loader is None:
-                    from app.core.config import settings
                     from sentence_transformers import SentenceTransformer
+
+                    from app.core.config import settings
 
                     token = getattr(settings, "HF_TOKEN", None)
                     cls.embedding_models[model_name] = SentenceTransformer(model_name, token=token)
@@ -29,9 +31,11 @@ class ModelRegistry:
             if model_name not in cls.reranking_models:
                 if loader is None:
                     import os
+
                     import torch
-                    from app.core.config import settings
                     from sentence_transformers import CrossEncoder
+
+                    from app.core.config import settings
 
                     # Limit PyTorch CPU worker threads to avoid context switching thrashing
                     cpu_count = os.cpu_count() or 4

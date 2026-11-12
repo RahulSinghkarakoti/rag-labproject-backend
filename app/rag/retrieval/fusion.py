@@ -6,7 +6,9 @@ def _normalize(results: list[tuple[object, float]]) -> dict[str, tuple[object, f
     maximum = max(scores)
     if minimum < 0:
         span = (maximum - minimum) or 1.0
-        return {str(document.id): (document, (score - minimum) / span) for document, score in results}
+        return {
+            str(document.id): (document, (score - minimum) / span) for document, score in results
+        }
     maximum = maximum or 1.0
     return {str(document.id): (document, score / maximum) for document, score in results}
 

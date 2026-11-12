@@ -1,6 +1,6 @@
 # Query Execution Pipeline Flow
 
-The **Query Execution Pipeline** coordinates the end-to-end RAG workflow for user queries: greeting fast-pathing, chat history loading, query transformation, multi-knowledge-base retrieval, cross-encoder reranking, prompt context assembly, LLM response generation (or token streaming), and durable run step logging.
+The **Query Execution Pipeline** coordinates the end-to-end RAG workflow for user prompts: message request handling, pipeline configuration validation, progressive conversation memory summarization, query transformation, multi-Knowledge-Base retrieval, cross-encoder reranking, prompt context assembly, LLM token streaming, cancellation management, and durable PostgreSQL audit persistence (`RunStep` & `ModelCall`).
 
 ---
 
@@ -10,50 +10,68 @@ The **Query Execution Pipeline** coordinates the end-to-end RAG workflow for use
 flowchart TD
     UserQuery(["💬 User Submits Message"]) --> API["FastAPI Thread Endpoint (/api/v1/threads)"]
     API --> Engine["QueryEngine.run() or run_stream()<br/>(app/rag/engine.py)"]
-    
+
     subgraph QueryEngine ["Query Engine & Run Lifecycle"]
         Engine --> CreateRun["Set Run.status = 'running'"]
-        CreateRun --> InitPipeline["Instantiate QueryPipeline<br/>(app/rag/pipeline/query.py)"]
-        
+        CreateRun --> CheckCancel1["Check CancellationManager (app/core/cancellation.py)"]
+        CheckCancel1 --> InitPipeline["Instantiate QueryPipeline & Validate ThreadConfig<br/>(app/rag/pipeline/query.py)"]
+
         subgraph Pipeline ["QueryPipeline Execution (_prepare & _generate)"]
-            InitPipeline --> GreetingCheck{"Is Query a Simple Greeting?<br/>(is_greeting_query)"}
             
-            %% Greeting Fast Path
-            GreetingCheck -->|Yes| GreetingBypass["Greeting Fast-Path Bypass"]
-            GreetingBypass --> FetchKBNames["Query DB for attached Knowledge Base names"]
-            FetchKBNames --> FormatGreeting["Construct KB-aware greeting response<br/>(Skip LLM & Vector Search)"]
+            %% Stage 1: Memory
+            InitPipeline --> Stage1["1. Memory Stage (app/rag/memory/manager.py)<br/>MemoryManager.get_conversation_context()"]
+            Stage1 --> SummaryCheck{"Turns > Trigger Threshold?"}
+            SummaryCheck -->|Yes| Compaction["ThreadSummarizer updates rolling summary<br/>Persists ThreadSummary record in DB"]
+            SummaryCheck -->|No| LoadTurns["Load recent turns verbatim"]
+            Compaction --> Stage2
+            LoadTurns --> Stage2
+
+            %% Stage 2: Transformation
+            Stage2["2. Query Transformation Stage (app/rag/query/)<br/>QueryTransformationProcessor.process()"]
+            Stage2 --> TransMode{"Configured Strategy Mode?"}
+            TransMode -->|none| PassThru["PassThrough -> [original_query]"]
+            TransMode -->|rewrite / hyde / multi_query / step_back / sub_queries| LLMTrans["LLM Transformer Execution"]
+            PassThru --> Stage3
+            LLMTrans --> Stage3
+
+            %% Stage 3: Retrieval
+            Stage3["3. Multi-KB Retrieval Stage (app/rag/retrieval/)<br/>RetrievalWorkflow.retrieve()"]
+            Stage3 --> GroupKB["Group KBs by embedding model"]
+            GroupKB --> SearchKBs["Dense, Sparse, Hybrid, or MMR Search"]
+            SearchKBs --> Stage4
+
+            %% Stage 4: Reranking
+            Stage4["4. Reranking Stage (app/rag/reranking/)<br/>CrossEncoderReranker"]
+            Stage4 --> RerankCheck{"Reranking Enabled?"}
+            RerankCheck -->|Yes| ScoreDocs["Score candidate chunks against anchor query<br/>Truncate candidates to top_n"]
+            RerankCheck -->|No| PassDocs["Pass retrieved candidate documents"]
+            ScoreDocs --> Stage5
+            PassDocs --> Stage5
+
+            %% Stage 5 & 6: Prompt & Generation
+            Stage5["5. Context Assembly (app/rag/memory/context.py)<br/>build_rag_context() & build_generation_prompt()"]
+            Stage5 --> EmitContextStatus["Emit context_status event with token metrics"]
+            EmitContextStatus --> Stage6["6. Generation Stage (app/rag/generation/)"]
             
-            %% Standard RAG Path
-            GreetingCheck -->|No| Step1["1. Memory Stage<br/>MemoryManager.load(thread_id)"]
-            Step1 --> Step2["2. Transformation Stage<br/>transform_query(query, provider, config)"]
-            Step2 --> Step3["3. Retrieval Stage<br/>retrieval_workflow.retrieve(queries, KBs, config)"]
-            Step3 --> Step4["4. Reranking Stage<br/>rerank_documents(queries, docs, config)"]
-            Step4 --> Step5["5. Context Assembly<br/>build_rag_context(queries, docs, memory)"]
-            Step5 --> Step6["6. Generation Prompt Builder<br/>build_generation_prompt(query, context, citation_enforced)"]
-            
-            subgraph Generation ["LLM Provider Execution"]
-                Step6 --> StreamMode{"Execution Mode?"}
-                StreamMode -->|Streaming| GenStream["Provider.astream(prompt)"]
-                StreamMode -->|Non-Streaming| GenInvoke["Provider.ainvoke_safe(prompt)"]
-                GenStream --> StreamTokens["Yield Token Events to Client"]
-            end
+            Stage6 --> ExecMode{"Execution Mode?"}
+            ExecMode -->|run_stream()| StreamTokens["Provider.astream(prompt)<br/>Yield token events to client"]
+            ExecMode -->|run()| NonStream["Provider.ainvoke_safe(prompt)"]
         end
 
-        FormatGreeting --> Persist
-        GenInvoke --> Persist
-        StreamTokens -->|Complete| Persist["7. Persist Run Results (_persist_run_result)"]
-        
+        StreamTokens -->|Complete| Persist["7. Durable Persistence (_persist_run_result)"]
+        NonStream --> Persist
+
         subgraph Persistence ["PostgreSQL Audit Trail"]
-            Persist --> AddMsg["Add Assistant Message to DB"]
-            Persist --> AddSteps["Add RunStep records:<br/>- query_transformation<br/>- retrieval<br/>- reranking<br/>- generation"]
-            Persist --> AddCall["Add ModelCall record:<br/>(provider, model, tokens, request/response)"]
-            AddCall --> MarkCompleted["Set Run.status = 'completed'"]
+            Persist --> AddMsg["Create Assistant Message record with citation metadata"]
+            Persist --> RecordSteps["Record RunStep records via PipelineStepExecutor:<br/>- memory, transformation, retrieval, reranking, generation"]
+            Persist --> RecordCall["Record ModelCall record<br/>(provider, model, tokens, request/response)"]
+            RecordCall --> MarkCompleted["Set Run.status = 'completed'"]
         end
     end
 
-    subgraph ErrorHandling ["Cancellation & Exception Handling"]
-        Pipeline -->|User Stopped| Cancelled["Set Run.status = 'cancelled'<br/>Add partial message with '[Generation stopped]'"]
-        Pipeline -->|Provider / System Error| Failed["Sanitize Exception<br/>Set Run.status = 'failed'<br/>Save run.error JSON"]
+    subgraph CancellationAndErrors ["Cancellation & Exception Handling"]
+        Pipeline -->|User Stopped / Disconnected| Cancelled["CancellationManager triggers CancelledError<br/>Set Run.status = 'cancelled'"]
+        Pipeline -->|Model Provider / System Error| Failed["sanitize_model_error()<br/>Set Run.status = 'failed'<br/>Save run.error JSON"]
     end
 
     MarkCompleted --> ReturnResult(["Return Final Response & Output Message ID"])
@@ -65,58 +83,68 @@ flowchart TD
 
 ## 🔬 Detailed Step-by-Step Breakdown
 
-### 1. Engine & Pipeline Initialization
+### 1. Engine & Configuration Validation
 - **Classes**: [`QueryEngine`](../app/rag/engine.py), [`QueryPipeline`](../app/rag/pipeline/query.py)
 - **Action**:
-  - Resolves `PipelineVersion` and active `ThreadConfig`.
-  - Instantiates LLM generation provider via `ProviderModelFactory`.
-  - Initializes `MemoryManager`, `PgVectorStore`, `RetrievalWorkflow`, and `PipelineStepExecutor`.
+  - Resolves active `PipelineVersion` configuration into a validated [`ThreadConfig`](../app/schemas/thread.py).
+  - Initializes LLM generation provider (`GroqProvider`, `GeminiProvider`, or `OpenAIProvider`) via `ProviderModelFactory`.
+  - Instantiates `PgVectorStore`, `RetrievalWorkflow`, `MemoryManager`, and `PipelineStepExecutor`.
+  - Sets `Run.status = "running"`.
 
-### 2. Fast-Path Greeting Bypass
-- **Function**: `is_greeting_query(query)`
-- **Logic**:
-  - Detects simple greetings (e.g., *"hi"*, *"hello"*, *"good morning"*).
-  - Skips vector search and LLM calls to optimize latency and token costs.
-  - Queries database for attached Knowledge Base names and returns an instant response (e.g., *"Hi! What would you like to get info from your knowledge base containing **Docs**?"*).
-
-### 3. Memory Stage
-- **Module**: [`app/rag/memory/manager.py`](../app/rag/memory/manager.py)
-- **Action**: Loads prior message turns in the current thread up to `before_sequence`.
-
-### 4. Query Transformation Stage
-- **Module**: [`app/rag/query/transformer.py`](../app/rag/query/transformer.py)
+### 2. Conversation Memory & Progressive Compaction
+- **Module**: [`app/rag/memory/manager.py`](../app/rag/memory/manager.py), [`app/rag/memory/summarizer.py`](../app/rag/memory/summarizer.py)
 - **Action**:
-  - Executes configured transformation technique (`none`, `rewrite`, `hyde`, `multi_query`, `step_back`, `sub_queries`).
-  - Converts single input query into one or more target retrieval queries.
+  - Loads prior chat turns for the thread up to `before_sequence`.
+  - Keeps recent dialogue turns (`THREAD_SUMMARY_RECENT_TURNS`) verbatim for immediate context.
+  - When unsummarized turns exceed `THREAD_SUMMARY_TRIGGER_THRESHOLD`, `ThreadSummarizer` compacts older turns into a rolling summary.
+  - Stores summary in PostgreSQL `ThreadSummary` table (`summary`, `covered_until_message_id`, `token_count`).
 
-### 5. Multi-KB Retrieval Stage
+### 3. Query Transformation Stage
+- **Modules**: [`app/rag/query/processor.py`](../app/rag/query/processor.py), [`app/rag/query/transformer.py`](../app/rag/query/transformer.py)
+- **Action**:
+  - `QueryTransformationProcessor` inspects `ThreadConfig.query_transformation.mode`.
+  - Executes configured technique (`none`, `rewrite`, `hyde`, `multi_query`, `step_back`, or `sub_queries`).
+  - Produces an array of target search query strings for the retrieval workflow.
+
+### 4. Multi-KB Candidate Retrieval
 - **Module**: [`app/rag/retrieval/workflow.py`](../app/rag/retrieval/workflow.py)
 - **Action**:
-  - Retrieves documents across all Knowledge Bases attached to the thread.
-  - Executes dense vector search, sparse BM25 search, hybrid weighted fusion, or MMR based on `ThreadConfig.retrieval`.
+  - Groups all Knowledge Bases attached to the thread by embedding model.
+  - Automatically expands retrieval `top_k` when reranking is enabled (`max(top_k, top_n) // query_count`).
+  - Executes dense vector search (`retrieve_dense`), sparse BM25 search (`retrieve_sparse`), hybrid weighted score fusion ($\alpha$), or MMR (`maximal_marginal_relevance`).
+  - Deduplicates candidates across transformed queries while preserving highest scores (`deduplicate_scored`).
 
-### 6. Reranking Stage
+### 5. Anchor Query Reranking Stage
 - **Module**: [`app/rag/reranking/reranker.py`](../app/rag/reranking/reranker.py)
 - **Action**:
-  - Applies cross-encoder model to score and re-order candidate documents against the query set.
-  - Truncates candidate list to top $N$ reranked documents (`ThreadConfig.reranking.top_n`).
+  - If `ThreadConfig.reranking.enabled=True`, scores candidate chunks against the anchor user query (`message.content`).
+  - Clamps candidate document content length to 1500 chars (~384 tokens) to prevent quadratic attention blowup during cross-encoder inference.
+  - Sorts candidates by rerank score, applies optional `score_threshold`, and truncates list to top $N$ reranked documents (`top_n`).
 
-### 7. Context & Prompt Assembly
+### 6. Context & Prompt Assembly
 - **Module**: [`app/rag/memory/context.py`](../app/rag/memory/context.py)
 - **Action**:
-  - Formats retrieved chunks and metadata into `[Context]` blocks.
-  - Builds generation prompt, enforcing strict citation rules if `citation_enforced=True`.
+  - Assembles formatted `[Context]` blocks including chunk text, document source metadata, and conversation summary.
+  - Builds generation prompt and applies optional citation rules (`citation_enforced=True`).
+  - In streaming mode, calculates context token metrics (`total_tokens`, `prompt_tokens`, `is_summarized`) and emits a `context_status` event.
 
-### 8. LLM Generation / Token Streaming
+### 7. LLM Response Generation & Token Streaming
 - **Module**: [`app/rag/generation/`](../app/rag/generation/)
 - **Action**:
-  - Sends context-augmented prompt to LLM provider (`GeminiProvider`, `GroqProvider`, `OpenAIProvider`).
-  - Supports both full-response invocation and streaming chunk-by-chunk generator yields.
+  - Sends assembled prompt to generation provider (`GroqProvider`, `GeminiProvider`, or `OpenAIProvider`).
+  - In non-streaming mode (`run()`): executes `ainvoke_safe()`.
+  - In streaming mode (`run_stream()`): streams tokens chunk-by-chunk using `astream()`, yielding `token` events and stage tracking events (`step_start`, `step_complete`).
 
-### 9. Durable Persistence & Run Step Audit Trail
-- **Module**: [`app/rag/engine.py`](../app/rag/engine.py#L182)
+### 8. Cancellation Management
+- **Module**: [`app/core/cancellation.py`](../app/core/cancellation.py)
 - **Action**:
-  - Saves assistant `Message` record.
-  - Writes structured `RunStep` records for auditability (`query_transformation`, `retrieval`, `reranking`, `generation`).
+  - Periodically checks `cancellation_manager.is_cancelled(run_id)` at every stage.
+  - If user stops execution or disconnects: aborts execution, sets `Run.status = "cancelled"`, and records cancellation details without writing incomplete output messages.
+
+### 9. Durable Persistence & Audit Trail
+- **Module**: [`app/rag/engine.py`](../app/rag/engine.py#L198)
+- **Action**:
+  - Saves assistant `Message` record with citation metadata (`index`, `name`, `mime_type`).
+  - Writes structured `RunStep` records via `PipelineStepExecutor` (`memory`, `transformation`, `retrieval`, `reranking`, `generation`).
   - Records `ModelCall` metadata (tokens, model name, provider, request/response).
-  - Sets `Run.status` to `completed`.
+  - Sets `Run.status = "completed"`.

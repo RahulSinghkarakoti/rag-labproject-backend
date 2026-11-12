@@ -1,14 +1,11 @@
 import io
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import select
 
-from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
-from app.models.pipeline import Pipeline, PipelineVersion
+from app.models.pipeline import PipelineVersion
 from app.models.thread import Thread
 from app.services.chat_service import ChatService
 from app.services.document_service import DocumentService

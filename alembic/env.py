@@ -2,18 +2,19 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config , pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
 # Adds the project root directory to sys.path so 'app' can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
- 
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
 from app.core.config import settings
+
 config.set_main_option(
     "sqlalchemy.url",
     settings.DATABASE_URL.replace("%", "%%")
@@ -32,8 +33,7 @@ if config.config_file_name is not None:
 # Make sure your models file actually exists!
 # If your models file is located at app/models.py or similar, import that exact module:
 # alembic/env.py
-import app.models  # Automatically registers all ORM models with Base.metadata!
-from app.models.base  import Base
+from app.models.base import Base
 
 target_metadata = Base.metadata
 # other values from the config, defined by the needs of env.py,

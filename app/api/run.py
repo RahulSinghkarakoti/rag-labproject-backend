@@ -1,4 +1,3 @@
-from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -33,7 +32,7 @@ async def get_run_details(
 
 @router.get(
     "/runs/{run_id}/steps",
-    response_model=APIResponse[List[RunStepResponse]],
+    response_model=APIResponse[list[RunStepResponse]],
 )
 async def get_run_steps(
     run_id: UUID,

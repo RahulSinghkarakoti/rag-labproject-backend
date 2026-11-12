@@ -47,10 +47,11 @@ class BaseGenerationProvider(ABC):
     async def astream(self, prompt: str):
         """Yield text chunks without changing existing provider interfaces."""
         try:
-            if not hasattr(self.model, "astream"):
+            model = getattr(self, "model", None)
+            if model is None or not hasattr(model, "astream"):
                 yield await self.ainvoke(prompt)
                 return
-            async for chunk in self.model.astream(prompt):
+            async for chunk in model.astream(prompt):
                 raw_content = getattr(chunk, "content", chunk)
                 text = self._extract_text_content(raw_content)
                 if text:
@@ -59,10 +60,12 @@ class BaseGenerationProvider(ABC):
             from app.core.exceptions import AppException, sanitize_model_error
             if isinstance(exc, AppException):
                 raise
+            config = getattr(self, "config", None)
+            model_name = getattr(config, "model", "unknown") if config else "unknown"
             raise sanitize_model_error(
                 exc,
-                provider=self.provider_name,
-                model=getattr(self.config, "model", "unknown"),
+                provider=getattr(self, "provider_name", "unknown"),
+                model=model_name,
             ) from exc
 
     @classmethod

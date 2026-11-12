@@ -1,5 +1,7 @@
-from pydantic import BaseModel, ConfigDict
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
 
 class ProjectResponse(BaseModel):
     id: UUID

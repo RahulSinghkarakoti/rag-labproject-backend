@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Awaitable, Coroutine, TypeVar
+from collections.abc import Awaitable, Coroutine
+from typing import Any, TypeVar
 
 from app.rag.pipeline.context import PipelineContext
 
@@ -79,8 +80,6 @@ class PipelineStepExecutor:
     def _format_output_for_db(self, step_name: str, result: Any) -> Any:
         try:
             from fastapi.encoders import jsonable_encoder
-
-            from app.models.document import Document
         except ImportError:
             jsonable_encoder = lambda x: x  # noqa
 
@@ -174,9 +173,9 @@ class PipelineStepExecutor:
                 step_name, input_data=input_data, config=config
             )
         start = time.monotonic()
-        
+
         result_container = {"response": ""}
-        
+
         try:
             yield result_container
             elapsed = time.monotonic() - start
@@ -339,7 +338,7 @@ class PipelineStepExecutor:
                     self.context.run_id,
                 )
                 return result
-            except Exception as exc:
+            except Exception:
                 elapsed = time.monotonic() - start
                 logger.error(
                     "pipeline_step step=%s state=failed elapsed=%.3fs run_id=%s",
@@ -381,7 +380,7 @@ class PipelineStepExecutor:
                     metadata={"elapsed_seconds": round(elapsed, 4)},
                 )
             return result
-        except asyncio.CancelledError as exc:
+        except asyncio.CancelledError:
             elapsed = time.monotonic() - start
             logger.warning(
                 "pipeline_step step=%s state=cancelled elapsed=%.3fs run_id=%s",

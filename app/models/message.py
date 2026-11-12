@@ -3,13 +3,12 @@
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
+    ForeignKey,
     String,
     Text,
-    ForeignKey,
-    BigInteger,
-    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, UUIDMixin

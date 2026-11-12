@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.cancellation import CancellationManager, cancellation_manager
-from app.models.document import Document
 from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
 from app.models.run import Run, RunStep
@@ -191,8 +190,9 @@ async def test_run_service_cancel_marks_running_steps_cancelled():
 
 @pytest.mark.anyio
 async def test_serialize_step_with_expired_attributes():
-    from app.rag.pipeline.executor import serialize_step
     from sqlalchemy.exc import PendingRollbackError
+
+    from app.rag.pipeline.executor import serialize_step
 
     class ExpiredStep:
         def __init__(self):

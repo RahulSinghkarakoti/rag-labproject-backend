@@ -1,11 +1,10 @@
-import asyncio
 import logging
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from arq import create_pool
 from arq.connections import RedisSettings
 
 from app.core.config import settings

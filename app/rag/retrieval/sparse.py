@@ -18,7 +18,7 @@ def bm25(query: str, documents: list, *, k1: float = 1.2, b: float = 0.75):
         term for terms in tokenized for term in query_terms if term in terms
     )
     scored = []
-    for document, terms in zip(documents, tokenized):
+    for document, terms in zip(documents, tokenized, strict=False):
         counts = Counter(terms)
         score = 0.0
         for term in query_terms:

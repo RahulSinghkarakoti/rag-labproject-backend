@@ -1,6 +1,5 @@
 """Global allowlists for models and generation providers."""
 
-from sqlalchemy import label
 
 
 SUPPORTED_EMBEDDING_MODELS = frozenset({

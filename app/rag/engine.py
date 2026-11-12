@@ -1,13 +1,14 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppException, sanitize_model_error
-from app.models.pipeline import PipelineVersion
 from app.models.message import Message
-from app.models.run import ModelCall, Run, RunStep
+from app.models.pipeline import PipelineVersion
+from app.models.run import Run
 from app.models.thread import Thread
 from app.rag.generation.base import BaseGenerationProvider
 from app.rag.generation.factory import ProviderModelFactory, provider_model_factory
@@ -27,82 +28,6 @@ class QueryEngine:
         self.provider_factory = provider_factory
         self.run_manager = run_manager
 
-    async def run(
-        self,
-        *,
-        run: Run,
-        thread: Thread,
-        message: Message,
-        pipeline_version: PipelineVersion,
-    ):
-        """
-        Execute one RAG/chat run using the pipeline version config.
-        Tracks run status (running -> completed / failed / cancelled).
-        """
-        config = pipeline_version.config or {}
-        now = datetime.now(timezone.utc)
-        run.started_at = now
-        run.status = "running"
-
-        try:
-            provider: BaseGenerationProvider = self.provider_factory.create(config)
-            pipeline = QueryPipeline(
-                db=self.db,
-                config=config,
-                run=run,
-                run_manager=self.run_manager,
-                thread=thread,
-                message=message,
-                provider=provider,
-            )
-
-            result = await pipeline.execute()
-
-            await self._persist_run_result(
-                run=run,
-                message=message,
-                result=result,
-                config=config,
-                provider=provider,
-            )
-
-            run.status = "completed"
-            run.completed_at = datetime.now(timezone.utc)
-            await self.db.commit()
-            return result
-
-        except (asyncio.CancelledError, GeneratorExit):
-            run.status = "cancelled"
-            run.completed_at = datetime.now(timezone.utc)
-            run.error = {
-                "code": "CANCELLED",
-                "message": "User stopped the retrieval or generation.",
-            }
-            await self.db.commit()
-            raise
-
-        except Exception as exc:
-            # Handle and sanitize backend model provider errors safely
-            if isinstance(exc, AppException):
-                safe_exc = exc
-            else:
-                gen_cfg = config.get("generation", {})
-                provider_name = gen_cfg.get("provider", "unknown")
-                model_name = gen_cfg.get("llm_model") or gen_cfg.get("model", "unknown")
-                safe_exc = sanitize_model_error(
-                    exc, provider=provider_name, model=model_name
-                )
-
-            run.status = "failed"
-            run.completed_at = datetime.now(timezone.utc)
-            run.error = {
-                "code": getattr(safe_exc, "code", "RUN_ERROR"),
-                "message": getattr(safe_exc, "message", str(safe_exc)),
-                "details": getattr(safe_exc, "details", None),
-            }
-            await self.db.commit()
-            raise safe_exc
-
     async def run_stream(
         self,
         *,
@@ -113,7 +38,7 @@ class QueryEngine:
     ):
         """Stream generation tokens and handle cancellation/disconnection gracefully."""
         config = pipeline_version.config or {}
-        run.started_at = datetime.now(timezone.utc)
+        run.started_at = datetime.now(UTC)
         run.status = "running"
         accumulated_tokens: list[str] = []
         run_id = str(run.id) if run and getattr(run, "id", None) else "unknown"
@@ -153,7 +78,7 @@ class QueryEngine:
                     provider=provider,
                 )
                 run.status = "completed"
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
                 await self.db.commit()
                 yield {
                     "type": "complete",
@@ -168,7 +93,7 @@ class QueryEngine:
 
             p_text = "".join(accumulated_tokens).strip()
             try:
-                setattr(run, "_partial_text", p_text)
+                run._partial_text = p_text
             except Exception:
                 pass
             logger.info("[QueryEngine] Stream cancelled for run %s (accumulated %d chars)", run_id, len(p_text))
@@ -186,7 +111,7 @@ class QueryEngine:
                 )
             )
             run.status = "failed"
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
             run.error = {
                 "code": getattr(safe_exc, "code", "RUN_ERROR"),
                 "message": getattr(safe_exc, "message", str(safe_exc)),
@@ -212,7 +137,7 @@ class QueryEngine:
             logger.info("[QueryEngine] Skipping persistence for cancelled run %s", run_id)
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         docs = result.get("reranked_documents", []) or result.get("retrieved_documents", [])
         citations = []
         for i, doc in enumerate(docs, start=1):
@@ -244,10 +169,10 @@ class QueryEngine:
         if self.run_manager:
             generation = config.get("generation", {})
             provider_config = getattr(provider, "config", None)
-            
+
             transformed_queries = result.get("transformed_queries", [])
             reranked_documents = result.get("reranked_documents", [])
-            
+
             await self.run_manager.record_model_call(
                 provider=getattr(provider, "provider_name", generation.get("provider", "unknown")),
                 model=getattr(provider_config, "model", generation.get("model", "unknown")),

@@ -1,3 +1,4 @@
+from datetime import UTC
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -5,7 +6,6 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.auth import RefreshToken
-from app.models.knowledge_base import KnowledgeBase
 from app.models.message import Message
 from app.models.pipeline import Pipeline, PipelineVersion
 from app.models.project import Project
@@ -13,12 +13,10 @@ from app.models.run import Run, RunStep
 from app.models.thread import Thread
 from app.models.user import User
 from app.schemas.auth import OAuthLoginRequest
-from app.schemas.knowledge_base import KnowledgeBaseCreateRequest, KnowledgeBaseUpdateRequest
 from app.schemas.pipeline import PipelineRequest, PipelineVersionRequest
 from app.schemas.project import ProjectRequest
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
-from app.services.knowledge_base_service import KnowledgeBaseService
 from app.services.pipeline_service import PipelineService
 from app.services.project_service import ProjectService
 from app.services.run_service import RunService
@@ -246,12 +244,13 @@ async def test_chat_service_project_threads_and_messages():
 # --- AuthService and AuthLog Tests ---
 @pytest.mark.anyio
 async def test_auth_service_logs_oauth_and_tokens():
+    from datetime import datetime, timedelta
+
+    from app.core.security import hash_refresh_token
     from app.models.audit_log import AuthLog
     from app.models.auth import OAuthAccount
-    from app.core.security import hash_refresh_token
-    from datetime import datetime, timezone, timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = User(
         id=1,
         email="test@example.com",
@@ -305,7 +304,7 @@ async def test_auth_service_logs_oauth_and_tokens():
         id=1,
         user_id=1,
         token_hash=hash_refresh_token(token_str),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        expires_at=datetime.now(UTC) + timedelta(days=7),
     )
 
     class RefreshMockDB(MockDB):
@@ -348,13 +347,15 @@ async def test_auth_service_logs_oauth_and_tokens():
 @pytest.mark.anyio
 async def test_exception_handlers_use_apierror_response():
     import json
+
     from starlette.exceptions import HTTPException as StarletteHTTPException
-    from app.core.exceptions import AppException
+
     from app.core.exception_handlers import (
         app_exception_handler,
         http_exception_handler,
         unhandled_exception_handler,
     )
+    from app.core.exceptions import AppException
 
     req = SimpleNamespace()
 
