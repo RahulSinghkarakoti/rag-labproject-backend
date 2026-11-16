@@ -36,12 +36,13 @@ class HyDETransformer(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
+        run_manager: Any = None,
     ) -> list[str]:
         stripped = query.strip()
         if not stripped:
             return []
 
-        count = max(1, min(config.query_count, 5))
+        count = max(1, min(config.query_count, 10))
 
         if config.prompt_template:
             prompt = PromptTemplate.from_template(config.prompt_template)
@@ -53,7 +54,13 @@ class HyDETransformer(BaseQueryTransformer):
             prompt = self.DEFAULT_SINGLE_PROMPT
             inputs = {"query": stripped}
 
-        raw_response = await execute_prompt_chain(prompt, inputs, provider)
+        raw_response = await execute_prompt_chain(
+            prompt,
+            inputs,
+            provider,
+            run_manager=run_manager,
+            stage_info={"transformer": "hyde"},
+        )
         hypotheses = clean_queries(raw_response, max_count=count, fallback_query=stripped)
 
         results = hypotheses if hypotheses else [stripped]

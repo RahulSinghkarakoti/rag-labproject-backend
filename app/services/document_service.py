@@ -108,7 +108,9 @@ class DocumentService:
             kb_dir = UPLOAD_DIR / str(kb_id)
             kb_dir.mkdir(parents=True, exist_ok=True)
             file_path = kb_dir / f"{uuid4().hex}_{safe_filename}"
-            await anyio.Path(file_path).write_bytes(await file.read())
+            async with await anyio.open_file(file_path, "wb") as f:
+                while chunk := await file.read(64 * 1024):
+                    await f.write(chunk)
 
             db_doc = Document(
                 knowledge_base_id=kb_id,

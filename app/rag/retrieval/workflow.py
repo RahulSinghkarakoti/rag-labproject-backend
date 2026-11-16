@@ -48,17 +48,17 @@ class RetrievalWorkflow:
                 res_dense = []
                 res_sparse = []
                 # 2. Dense retrieval
+                candidate_fetch_k = (
+                    config.fetch_k
+                    if (strategy == "mmr" or config.fetch_k > config.top_k)
+                    else config.top_k
+                )
                 if strategy in {"dense", "hybrid", "mmr"}:
-                    fetch_k = (
-                        config.fetch_k
-                        if strategy == "mmr"
-                        else config.top_k
-                    )
                     dense_results = await retrieve_dense(
                         self.vector_store,
                         emb,
                         query,
-                        top_k=fetch_k,
+                        top_k=candidate_fetch_k,
                         filters=flt,
                     )
 
@@ -76,13 +76,13 @@ class RetrievalWorkflow:
                         self.vector_store,
                         query,
                         model=config.sparse_model,
-                        top_k=config.top_k,
+                        top_k=candidate_fetch_k,
                         filters=flt,
                     )
                     res_sparse.extend(sparse_results)
                 return res_dense, res_sparse
 
-            results = await asyncio.gather(*(process_query(q) for q in queries))
+            results = [await process_query(q) for q in queries]
             for res_dense, res_sparse in results:
                 all_dense.extend(res_dense)
                 all_sparse.extend(res_sparse)

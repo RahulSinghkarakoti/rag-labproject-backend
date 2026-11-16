@@ -45,6 +45,7 @@ class QueryTransformationProcessor:
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig | dict | None = None,
         memory: Any = None,
+        run_manager: Any = None,
     ) -> list[str]:
         """
         Executes query transformation using the configured technique.
@@ -72,6 +73,7 @@ class QueryTransformationProcessor:
             provider=provider,
             config=norm_config,
             memory=memory,
+            run_manager=run_manager,
         )
 
         return transformed or [stripped_query]

@@ -28,6 +28,7 @@ class MultiQueryExpander(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
+        run_manager: Any = None,
     ) -> list[str]:
         stripped = query.strip()
         if not stripped:
@@ -41,7 +42,13 @@ class MultiQueryExpander(BaseQueryTransformer):
             prompt = self.DEFAULT_PROMPT
 
         inputs = {"query": stripped, "count": count}
-        raw_response = await execute_prompt_chain(prompt, inputs, provider)
+        raw_response = await execute_prompt_chain(
+            prompt,
+            inputs,
+            provider,
+            run_manager=run_manager,
+            stage_info={"transformer": "multi_query"},
+        )
         expanded = clean_queries(raw_response, max_count=count, fallback_query=stripped)
 
         if config.include_original:

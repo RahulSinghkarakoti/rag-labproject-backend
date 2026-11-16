@@ -26,3 +26,9 @@ class PipelineVersionRequest(BaseModel):
     version: int | None = None
     config: dict
 
+
+class PruneVersionsResponse(BaseModel):
+    deleted_count: int
+    deleted_version_ids: list[UUID]
+
+

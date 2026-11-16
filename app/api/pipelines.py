@@ -12,6 +12,7 @@ from app.schemas.pipeline import (
     PipelineResponse,
     PipelineVersionRequest,
     PipelineVersionResponse,
+    PruneVersionsResponse,
 )
 from app.services.pipeline_service import PipelineService
 
@@ -224,3 +225,32 @@ async def delete_pipeline_version(
         message="Pipeline version deleted successfully",
         data=None,
     )
+
+
+@router.post(
+    "/pipelines/{pipeline_id}/pipeline-versions/prune",
+    response_model=APIResponse[PruneVersionsResponse],
+)
+@router.post(
+    "/pipelines/{pipeline_id}/prune-versions",
+    response_model=APIResponse[PruneVersionsResponse],
+)
+@router.delete(
+    "/pipelines/{pipeline_id}/pipeline-versions/unused",
+    response_model=APIResponse[PruneVersionsResponse],
+)
+async def prune_pipeline_versions(
+    pipeline_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = PipelineService(db)
+    result = await service.prune_pipeline_versions(
+        pipeline_id=pipeline_id, user_id=current_user.id
+    )
+    return APIResponse(
+        success=True,
+        message=f"Successfully pruned {result['deleted_count']} unused pipeline version(s)",
+        data=PruneVersionsResponse.model_validate(result),
+    )
+

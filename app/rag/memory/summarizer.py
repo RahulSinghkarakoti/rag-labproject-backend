@@ -69,6 +69,7 @@ class ThreadSummarizer:
         self,
         existing_summary: str | None,
         turns: list[dict[str, Any]],
+        run_manager: Any = None,
     ) -> str:
         """
         Generate an updated running summary by combining any existing summary
@@ -97,15 +98,63 @@ class ThreadSummarizer:
             dialogue_turns=dialogue_text,
         )
 
+        import time
+        from app.rag.memory.context import estimate_context_tokens
+
+        start = time.monotonic()
         try:
             summary = await self.provider.ainvoke(prompt)
             clean_summary = summary.strip()
+            elapsed_ms = int((time.monotonic() - start) * 1000)
             logger.info(
                 "[ThreadSummarizer] Successfully generated rolling summary (%d chars)",
                 len(clean_summary),
             )
+            if run_manager and hasattr(run_manager, "record_model_call"):
+                in_tokens = estimate_context_tokens(prompt)
+                out_tokens = estimate_context_tokens(clean_summary)
+                try:
+                    await run_manager.record_model_call(
+                        provider=getattr(self.provider, "provider_name", "unknown"),
+                        model=getattr(getattr(self.provider, "config", None), "model", "unknown"),
+                        request={
+                            "stage": "memory_summarizer",
+                            "prompt": prompt,
+                            "turn_count": len(turns),
+                        },
+                        response={"content": clean_summary},
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                        total_tokens=in_tokens + out_tokens,
+                        latency_ms=elapsed_ms,
+                        status="completed",
+                    )
+                except Exception as rec_exc:
+                    logger.warning("[ThreadSummarizer] Failed to record model call: %s", rec_exc)
             return clean_summary
-        except Exception:
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            if run_manager and hasattr(run_manager, "record_model_call"):
+                in_tokens = estimate_context_tokens(prompt)
+                try:
+                    await run_manager.record_model_call(
+                        provider=getattr(self.provider, "provider_name", "unknown"),
+                        model=getattr(getattr(self.provider, "config", None), "model", "unknown"),
+                        request={
+                            "stage": "memory_summarizer",
+                            "prompt": prompt,
+                            "turn_count": len(turns),
+                        },
+                        response=None,
+                        input_tokens=in_tokens,
+                        output_tokens=0,
+                        total_tokens=in_tokens,
+                        latency_ms=elapsed_ms,
+                        status="failed",
+                        error={"message": str(exc)},
+                    )
+                except Exception as rec_exc:
+                    logger.warning("[ThreadSummarizer] Failed to record model call: %s", rec_exc)
             logger.warning(
                 "[ThreadSummarizer] Failed to summarize dialogue turns, keeping existing summary",
                 exc_info=True,

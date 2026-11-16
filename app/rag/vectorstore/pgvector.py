@@ -161,6 +161,7 @@ class PgVectorStore(BaseVectorStore):
         query: str,
         *,
         filters: dict | None = None,
+        limit: int | None = None,
     ) -> list[DocumentChunk]:
         filters = filters or {}
         terms = [term for term in query.split() if term]
@@ -173,6 +174,8 @@ class PgVectorStore(BaseVectorStore):
         if knowledge_base_id:
             ids = knowledge_base_id if isinstance(knowledge_base_id, (list, tuple, set)) else [knowledge_base_id]
             stmt = stmt.where(Document.knowledge_base_id.in_([uuid.UUID(str(value)) for value in ids]))
+        if limit is not None and limit > 0:
+            stmt = stmt.limit(limit)
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 

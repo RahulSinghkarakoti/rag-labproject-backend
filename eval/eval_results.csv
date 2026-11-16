@@ -1,0 +1,31 @@
+config_label,split,question,target_doc_index,ground_truth_answer,retrieved_indices,hit@1,hit@3,hit@5,mrr,ret_latency_ms,generated_answer,gen_latency_ms
+Pure Dense,single,What do keybullet kin drop?,0,Keybullet kin drop a key upon death.,"[0, 0, 0, 0, 0]",1,1,1,1.0,32176.0,,0.0
+Pure Dense,single,What kind of gun does the bandana bullet kin use?,0,The bandana bullet kin wields a machine pistol.,"[0, 0, 0, 0, 0]",1,1,1,1.0,28.1,,0.0
+Pure Dense,multi,Which enemy types wield an AK-47?,0,Assault-rifle wielding Bullet and Tankers wield AK-47s.,"[0, 0, 0, 0, 0]",1,1,1,1.0,31.5,,0.0
+Pure Dense,multi,What makes jammed enemies different?,0,"Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.","[0, 0, 0, 0, 0]",1,1,1,1.0,30.2,,0.0
+Pure Dense,no_answer,How much health does the Mutant Bullet Kin have?,0,,"[0, 0, 0, 0, 0]",1,1,1,1.0,31.9,,0.0
+Pure Dense,no_answer,Where can bishops be found?,0,,"[7, 16, 15, 15, 0]",0,0,1,0.2,29.1,,0.0
+Pure Sparse (BM25),single,What do keybullet kin drop?,0,Keybullet kin drop a key upon death.,"[0, 0, 0, 0, 0]",1,1,1,1.0,220.9,,0.0
+Pure Sparse (BM25),single,What kind of gun does the bandana bullet kin use?,0,The bandana bullet kin wields a machine pistol.,"[0, 0, 0, 0, 0]",1,1,1,1.0,364.1,,0.0
+Pure Sparse (BM25),multi,Which enemy types wield an AK-47?,0,Assault-rifle wielding Bullet and Tankers wield AK-47s.,"[0, 13, 13, 0, 0]",1,1,1,1.0,372.4,,0.0
+Pure Sparse (BM25),multi,What makes jammed enemies different?,0,"Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.","[0, 0, 11, 16, 11]",1,1,1,1.0,132.3,,0.0
+Pure Sparse (BM25),no_answer,How much health does the Mutant Bullet Kin have?,0,,"[0, 0, 0, 0, 0]",1,1,1,1.0,687.0,,0.0
+Pure Sparse (BM25),no_answer,Where can bishops be found?,0,,"[16, 17, 17, 3, 16]",0,0,0,0.0,450.3,,0.0
+Hybrid (alpha=0.5),single,What do keybullet kin drop?,0,Keybullet kin drop a key upon death.,"[0, 0, 0, 0, 0]",1,1,1,1.0,712.3,,0.0
+Hybrid (alpha=0.5),single,What kind of gun does the bandana bullet kin use?,0,The bandana bullet kin wields a machine pistol.,"[0, 0, 0, 0, 0]",1,1,1,1.0,697.1,,0.0
+Hybrid (alpha=0.5),multi,Which enemy types wield an AK-47?,0,Assault-rifle wielding Bullet and Tankers wield AK-47s.,"[0, 0, 0, 0, 0]",1,1,1,1.0,873.1,,0.0
+Hybrid (alpha=0.5),multi,What makes jammed enemies different?,0,"Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.","[0, 0, 0, 0, 0]",1,1,1,1.0,460.5,,0.0
+Hybrid (alpha=0.5),no_answer,How much health does the Mutant Bullet Kin have?,0,,"[0, 0, 0, 0, 0]",1,1,1,1.0,1693.6,,0.0
+Hybrid (alpha=0.5),no_answer,Where can bishops be found?,0,,"[16, 7, 17, 17, 3]",0,0,0,0.0,1778.3,,0.0
+Hybrid + Cross-Encoder,single,What do keybullet kin drop?,0,Keybullet kin drop a key upon death.,"[0, 0, 0, 0, 0]",1,1,1,1.0,9555.1,,0.0
+Hybrid + Cross-Encoder,single,What kind of gun does the bandana bullet kin use?,0,The bandana bullet kin wields a machine pistol.,"[0, 0, 0, 0, 0]",1,1,1,1.0,1449.7,,0.0
+Hybrid + Cross-Encoder,multi,Which enemy types wield an AK-47?,0,Assault-rifle wielding Bullet and Tankers wield AK-47s.,"[0, 0, 0, 0, 0]",1,1,1,1.0,1734.6,,0.0
+Hybrid + Cross-Encoder,multi,What makes jammed enemies different?,0,"Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.","[0, 0, 0, 0, 0]",1,1,1,1.0,1236.4,,0.0
+Hybrid + Cross-Encoder,no_answer,How much health does the Mutant Bullet Kin have?,0,,"[0, 0, 0, 0, 0]",1,1,1,1.0,2244.2,,0.0
+Hybrid + Cross-Encoder,no_answer,Where can bishops be found?,0,,"[7, 17, 17, 16, 3]",0,0,0,0.0,1494.7,,0.0
+MMR (Diversity lambda=0.5),single,What do keybullet kin drop?,0,Keybullet kin drop a key upon death.,"[0, 16, 16, 0, 0]",1,1,1,1.0,182.6,,0.0
+MMR (Diversity lambda=0.5),single,What kind of gun does the bandana bullet kin use?,0,The bandana bullet kin wields a machine pistol.,"[0, 0, 15, 0, 16]",1,1,1,1.0,207.9,,0.0
+MMR (Diversity lambda=0.5),multi,Which enemy types wield an AK-47?,0,Assault-rifle wielding Bullet and Tankers wield AK-47s.,"[0, 7, 15, 0, 16]",1,1,1,1.0,178.1,,0.0
+MMR (Diversity lambda=0.5),multi,What makes jammed enemies different?,0,"Jammed Keybullet Kin drop 2 keys instead of 1, jammed Chance Kins have a chance to drop twice the loot, and jammed red-Caped Bullet Kin deal contact damage. Additionally, Jammed Keybullet Kin Jammed variations run faster and will take less time to teleport away from the player if they are not destroyed quickly.","[0, 16, 1, 16, 0]",1,1,1,1.0,147.0,,0.0
+MMR (Diversity lambda=0.5),no_answer,How much health does the Mutant Bullet Kin have?,0,,"[0, 18, 9, 17, 0]",1,1,1,1.0,213.5,,0.0
+MMR (Diversity lambda=0.5),no_answer,Where can bishops be found?,0,,"[7, 15, 8, 16, 1]",0,0,0,0.0,156.4,,0.0

@@ -14,6 +14,11 @@ wheels/
 .aws
 .codex
 .pytest_cache
+.ruff_cache
+.rederive
+
+# Diagram dumps
+*.png
 
 
 graphify-out

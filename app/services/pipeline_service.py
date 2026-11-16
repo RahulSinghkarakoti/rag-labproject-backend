@@ -2,10 +2,13 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline import Pipeline, PipelineVersion
 from app.models.project import Project
+from app.models.run import Run
+from app.models.thread import Thread
 from app.schemas.pipeline import PipelineRequest, PipelineVersionRequest
 
 
@@ -96,20 +99,31 @@ class PipelineService:
         self, pipeline_id: UUID, user_id: int, data: PipelineVersionRequest
     ) -> PipelineVersion:
         await self.get_pipeline(pipeline_id, user_id)
-        latest = await self.db.scalar(
-            select(PipelineVersion)
-            .where(PipelineVersion.pipeline_id == pipeline_id)
-            .order_by(PipelineVersion.version.desc())
-        )
-        new_version = PipelineVersion(
-            version=data.version or (latest.version + 1 if latest else 1),
-            config=data.config,
-            pipeline_id=pipeline_id,
-        )
-        self.db.add(new_version)
-        await self.db.commit()
-        await self.db.refresh(new_version)
-        return new_version
+        max_attempts = 3 if data.version is None else 1
+        for attempt in range(max_attempts):
+            latest = await self.db.scalar(
+                select(PipelineVersion)
+                .where(PipelineVersion.pipeline_id == pipeline_id)
+                .order_by(PipelineVersion.version.desc())
+            )
+            target_version = data.version or (latest.version + 1 if latest else 1)
+            new_version = PipelineVersion(
+                version=target_version,
+                config=data.config,
+                pipeline_id=pipeline_id,
+            )
+            self.db.add(new_version)
+            try:
+                await self.db.commit()
+                await self.db.refresh(new_version)
+                return new_version
+            except IntegrityError:
+                await self.db.rollback()
+                if attempt == max_attempts - 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Pipeline version {target_version} already exists",
+                    )
 
     async def get_pipeline_version(
         self, version_id: UUID, user_id: int
@@ -143,3 +157,58 @@ class PipelineService:
         version = await self.get_pipeline_version(version_id, user_id)
         await self.db.delete(version)
         await self.db.commit()
+
+    async def prune_pipeline_versions(
+        self, pipeline_id: UUID, user_id: int
+    ) -> dict:
+        """Prune unreferenced pipeline versions.
+
+        Deletes versions that:
+        1. Belong to this pipeline.
+        2. Are NOT the latest version of the pipeline.
+        3. Are NOT referenced by any active Thread (thread.pipeline_version_id).
+        4. Are NOT referenced by any Run (run.pipeline_version_id).
+        """
+        await self.get_pipeline(pipeline_id, user_id)
+
+        # 1. Identify latest version to ensure it is never deleted
+        latest_version_id = await self.db.scalar(
+            select(PipelineVersion.id)
+            .where(PipelineVersion.pipeline_id == pipeline_id)
+            .order_by(PipelineVersion.version.desc())
+            .limit(1)
+        )
+
+        # Subqueries for referenced version IDs
+        referenced_by_threads = select(Thread.pipeline_version_id).where(
+            Thread.pipeline_version_id.is_not(None)
+        )
+        referenced_by_runs = select(Run.pipeline_version_id).where(
+            Run.pipeline_version_id.is_not(None)
+        )
+
+        stmt = select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.id.not_in(referenced_by_threads),
+            PipelineVersion.id.not_in(referenced_by_runs),
+        )
+
+        if latest_version_id is not None:
+            stmt = stmt.where(PipelineVersion.id != latest_version_id)
+
+        result = await self.db.scalars(stmt)
+        unused_versions = list(result.all())
+
+        deleted_ids: list[UUID] = []
+        for version in unused_versions:
+            deleted_ids.append(version.id)
+            await self.db.delete(version)
+
+        if deleted_ids:
+            await self.db.commit()
+
+        return {
+            "deleted_count": len(deleted_ids),
+            "deleted_version_ids": deleted_ids,
+        }
+

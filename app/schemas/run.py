@@ -22,6 +22,23 @@ class RunStepResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ModelCallResponse(BaseModel):
+    id: UUID
+    run_id: UUID
+    provider: str
+    model: str
+    request: dict[str, Any] | None = None
+    response: dict[str, Any] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    latency_ms: int | None = None
+    status: str = "completed"
+    error: dict[str, Any] | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class RunDetailsResponse(BaseModel):
     id: UUID
     thread_id: UUID
@@ -33,5 +50,6 @@ class RunDetailsResponse(BaseModel):
     completed_at: datetime | None = None
     error: Any | None = None
     steps: list[RunStepResponse] = Field(default_factory=list)
+    model_calls: list[ModelCallResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

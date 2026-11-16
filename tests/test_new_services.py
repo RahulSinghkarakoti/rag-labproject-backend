@@ -164,6 +164,41 @@ async def test_pipeline_service_crud():
     assert new_v.config == {"k": "v"}
 
 
+@pytest.mark.anyio
+async def test_pipeline_service_prune_versions():
+    project_id = uuid4()
+    pipeline_id = uuid4()
+    v1_id = uuid4()
+    v2_id = uuid4()
+    user_id = 1
+
+    pipeline = Pipeline(id=pipeline_id, project_id=project_id, user_id=user_id, name="Pipe")
+    v1 = PipelineVersion(id=v1_id, pipeline_id=pipeline_id, version=1, config={})
+
+    call_count = {"scalar": 0}
+
+    def scalar_mock(stmt):
+        call_count["scalar"] += 1
+        if call_count["scalar"] == 1:
+            # get_pipeline
+            return pipeline
+        elif call_count["scalar"] == 2:
+            # latest version id
+            return v2_id
+        # scalars call for unused versions returns [v1]
+        return [v1]
+
+    db = MockDB(scalar_return=scalar_mock)
+    service = PipelineService(db)
+
+    res = await service.prune_pipeline_versions(pipeline_id, user_id)
+    assert res["deleted_count"] == 1
+    assert res["deleted_version_ids"] == [v1_id]
+    assert v1 in db.deleted
+    assert db.committed is True
+
+
+
 # --- RunService Tests ---
 @pytest.mark.anyio
 async def test_run_service_get_and_cancel():

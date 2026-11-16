@@ -85,12 +85,24 @@ class RerankingConfig(BaseModel):
     enabled: bool = True
     model: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2", min_length=1, max_length=200)
     top_n: int = Field(default=10, ge=1, le=200)
-    top_k: int = Field(default=5, ge=1, le=100)
+    top_k: int = Field(default=10, ge=1, le=100)
     batch_size: int = Field(default=16, ge=1, le=256)
     score_threshold: float | None = None
     return_documents: bool = True
 
     _validate_model = field_validator("model")(validate_reranking_model)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_top_n_and_top_k(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = dict(data)
+            # Harmonize top_n and top_k so both reflect client or backend preference
+            if "top_n" in data and "top_k" not in data:
+                data["top_k"] = min(data["top_n"], 100)
+            elif "top_k" in data and "top_n" not in data:
+                data["top_n"] = data["top_k"]
+        return data
 
     model_config = ConfigDict(extra="forbid")
 
@@ -107,6 +119,9 @@ class GenerationConfig(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1000, ge=1, le=32000)
     citation_enforced: bool = False
+    chat_mode: Literal["conversational", "strict"] = "conversational"
+    suggest_followups: bool = True
+    system_prompt: str | None = None
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

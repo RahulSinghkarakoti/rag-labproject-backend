@@ -19,7 +19,6 @@ SUPPORTED_GENERATION_MODELS = {
         "gpt-oss-120b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        "whisper-large-v3",
     }),
     "gemini": frozenset({"gemini-2.5-pro","gemini-2.5-flash","gemini-3.8-flash" ,  "gemini-3.7-flash" ,
       "gemini-3.5-flash" , "gemini-3.5-flash-lite"}),

@@ -29,6 +29,7 @@ class StepBackTransformer(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
+        run_manager: Any = None,
     ) -> list[str]:
         stripped = query.strip()
         if not stripped:
@@ -40,7 +41,13 @@ class StepBackTransformer(BaseQueryTransformer):
             prompt = self.DEFAULT_PROMPT
 
         inputs = {"query": stripped}
-        raw_response = await execute_prompt_chain(prompt, inputs, provider)
+        raw_response = await execute_prompt_chain(
+            prompt,
+            inputs,
+            provider,
+            run_manager=run_manager,
+            stage_info={"transformer": "step_back"},
+        )
         step_back_list = clean_queries(raw_response, max_count=1, fallback_query=stripped)
         step_back_query = step_back_list[0] if step_back_list else stripped
 

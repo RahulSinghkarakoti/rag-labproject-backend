@@ -10,14 +10,31 @@ from __future__ import annotations
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Default generation system prompt
+# Generation system prompts
 # ---------------------------------------------------------------------------
 
-DEFAULT_SYSTEM_PROMPT: str = (
+STRICT_SYSTEM_PROMPT: str = (
     "Answer the user query using only the provided retrieved context and "
     "conversation memory. If the context is insufficient, say so clearly. "
     "Do not invent facts."
 )
+
+CONVERSATIONAL_SYSTEM_PROMPT: str = (
+    "You are an insightful and helpful AI research partner in a conversational chat thread. "
+    "Your goal is to provide rich, comprehensive, and engaging answers grounded in the provided documents and conversation history.\n\n"
+    "Guidelines:\n"
+    "1. Directly address the user's question first in a clear, natural, and helpful conversational tone.\n"
+    "2. If the retrieved context contains relevant supplementary facts, insights, or nuance that the user didn't explicitly ask for but are helpful, share them naturally.\n"
+    "3. Base all factual claims strictly on the provided retrieved context and conversation memory. Do not invent external facts or speculate beyond the sources.\n"
+    "4. If the retrieved context is insufficient or silent on certain aspects, politely clarify what is known from the documents and what is not covered."
+)
+
+FOLLOWUP_SUGGESTIONS_PROMPT: str = (
+    "\n\nAt the end of your response, provide a brief 'Suggested Follow-ups' section "
+    "with 2-3 logical next questions or exploration topics the user might find valuable based on the context."
+)
+
+DEFAULT_SYSTEM_PROMPT: str = CONVERSATIONAL_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -105,21 +122,34 @@ def build_generation_prompt(
     context: str,
     system_prompt: str | None = None,
     citation_enforced: bool = False,
+    chat_mode: str = "conversational",
+    suggest_followups: bool = True,
 ) -> str:
     """
     Build the final prompt that is sent to the LLM provider.
 
     Args:
-        query:             The original (or primary) user query.
-        context:           The assembled RAG context string from :func:`build_rag_context`.
-        system_prompt:     Optional override for the system instructions.
-                           Falls back to :data:`DEFAULT_SYSTEM_PROMPT` when *None*.
-        citation_enforced: Whether to append strict inline citation rules.
+        query:              The original (or primary) user query.
+        context:            The assembled RAG context string from :func:`build_rag_context`.
+        system_prompt:      Optional override for the system instructions.
+                            Falls back to mode default when *None*.
+        citation_enforced:  Whether to append strict inline citation rules.
+        chat_mode:          Generation style ("conversational" or "strict").
+        suggest_followups:  Whether to include follow-up suggestion prompt in conversational mode.
 
     Returns:
         A ready-to-send prompt string.
     """
-    instructions = system_prompt or DEFAULT_SYSTEM_PROMPT
+    if system_prompt:
+        instructions = system_prompt
+    elif chat_mode == "strict":
+        instructions = STRICT_SYSTEM_PROMPT
+    else:
+        instructions = CONVERSATIONAL_SYSTEM_PROMPT
+
+    if suggest_followups and chat_mode != "strict":
+        instructions += FOLLOWUP_SUGGESTIONS_PROMPT
+
     if citation_enforced:
         instructions += (
             " Strictly enforce citations: Every statement or claim based on retrieved context MUST include inline citations corresponding to document names (e.g. [document_name.pdf], [other_document.txt])."

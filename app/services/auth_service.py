@@ -1,5 +1,6 @@
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -166,11 +167,18 @@ class AuthService:
             )
 
         now = datetime.now(UTC)
+        is_grace_period = False
+        elapsed = 0.0
         if stored_token.revoked_at is not None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token has been revoked",
-            )
+            grace_seconds = getattr(settings, "REFRESH_TOKEN_GRACE_SECONDS", 30)
+            elapsed = (now - stored_token.revoked_at).total_seconds()
+            if 0 <= elapsed <= grace_seconds:
+                is_grace_period = True
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token has been revoked",
+                )
         if stored_token.expires_at <= now:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -190,8 +198,9 @@ class AuthService:
                 detail="User not found",
             )
 
-        # Revoke old refresh token
-        stored_token.revoked_at = now
+        # Revoke old refresh token (if not already revoked in grace period)
+        if not is_grace_period:
+            stored_token.revoked_at = now
 
         # Create new tokens
         access_token = create_access_token(user.id)
@@ -204,13 +213,19 @@ class AuthService:
         self.db.add(new_refresh_record)
 
         # Record token refresh in audit log
+        log_meta: dict[str, Any] = {
+            "action": "rotate_refresh_token_grace" if is_grace_period else "rotate_refresh_token"
+        }
+        if is_grace_period:
+            log_meta["grace_seconds_elapsed"] = round(elapsed, 2)
+
         self._log_event(
             user_id=user.id,
-            event="token_refresh",
+            event="token_refresh_grace" if is_grace_period else "token_refresh",
             provider=None,
             ip_address=ip_address,
             user_agent=user_agent,
-            log_metadata={"action": "rotate_refresh_token"},
+            log_metadata=log_meta,
         )
 
         await self.db.commit()

@@ -37,6 +37,7 @@ from app.rag.generation.base import BaseGenerationProvider
 from app.rag.memory.context import (
     build_generation_prompt,
     build_rag_context,
+    estimate_context_tokens,
     get_context_metrics,
 )
 from app.rag.memory.manager import MemoryManager
@@ -175,7 +176,10 @@ class QueryPipeline:
         prompt = build_generation_prompt(
             self.message.content,
             state.context,
+            system_prompt=self.thread_config.generation.system_prompt,
             citation_enforced=self.thread_config.generation.citation_enforced,
+            chat_mode=self.thread_config.generation.chat_mode,
+            suggest_followups=self.thread_config.generation.suggest_followups,
         )
 
         step = None
@@ -202,30 +206,104 @@ class QueryPipeline:
                 yield {"type": "token", "content": chunk}
 
             elapsed = time.monotonic() - start
-            if self.run_manager and step:
-                step = await self.run_manager.complete_step(
-                    step,
-                    output_data={"response": "".join(response_parts)},
-                    metadata={"elapsed_seconds": round(elapsed, 4)},
-                )
-                yield {"type": "step_complete", "step": serialize_step(step)}
+            if self.run_manager:
+                if step:
+                    step = await self.run_manager.complete_step(
+                        step,
+                        output_data={"response": "".join(response_parts)},
+                        metadata={"elapsed_seconds": round(elapsed, 4)},
+                    )
+                    yield {"type": "step_complete", "step": serialize_step(step)}
+
+                resp_text = "".join(response_parts)
+                in_tokens = estimate_context_tokens(prompt)
+                out_tokens = estimate_context_tokens(resp_text)
+                try:
+                    await self.run_manager.record_model_call(
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        request={
+                            "stage": "generation",
+                            "prompt": prompt,
+                            "temperature": self.thread_config.generation.temperature,
+                            "max_tokens": self.thread_config.generation.max_tokens,
+                        },
+                        response={"content": resp_text},
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                        total_tokens=in_tokens + out_tokens,
+                        latency_ms=int(elapsed * 1000),
+                        status="completed",
+                    )
+                except Exception as rec_exc:
+                    logger.warning("[QueryPipeline] Failed to record generation model call: %s", rec_exc)
         except asyncio.CancelledError:
             elapsed = time.monotonic() - start
-            if self.run_manager and step:
-                if hasattr(self.run_manager, "cancel_step"):
-                    step = await self.run_manager.cancel_step(step, "Request cancelled by user")
-                else:
-                    step = await self.run_manager.fail_step(step, "Request cancelled by user")
+            if self.run_manager:
+                if step:
+                    if hasattr(self.run_manager, "cancel_step"):
+                        step = await self.run_manager.cancel_step(step, "Request cancelled by user")
+                    else:
+                        step = await self.run_manager.fail_step(step, "Request cancelled by user")
+                    try:
+                        yield {"type": "step_cancelled", "step": serialize_step(step)}
+                    except (asyncio.CancelledError, GeneratorExit):
+                        pass
+
+                resp_text = "".join(response_parts)
+                in_tokens = estimate_context_tokens(prompt)
+                out_tokens = estimate_context_tokens(resp_text)
                 try:
-                    yield {"type": "step_cancelled", "step": serialize_step(step)}
-                except (asyncio.CancelledError, GeneratorExit):
-                    pass
+                    await self.run_manager.record_model_call(
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        request={
+                            "stage": "generation",
+                            "prompt": prompt,
+                            "temperature": self.thread_config.generation.temperature,
+                            "max_tokens": self.thread_config.generation.max_tokens,
+                        },
+                        response={"content": resp_text} if resp_text else None,
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                        total_tokens=in_tokens + out_tokens,
+                        latency_ms=int(elapsed * 1000),
+                        status="cancelled",
+                        error={"code": "CANCELLED", "message": "Request cancelled by user"},
+                    )
+                except Exception as rec_exc:
+                    logger.warning("[QueryPipeline] Failed to record cancelled model call: %s", rec_exc)
             raise
         except Exception as exc:
             elapsed = time.monotonic() - start
-            if self.run_manager and step:
-                step = await self.run_manager.fail_step(step, str(exc))
-                yield {"type": "step_failed", "step": serialize_step(step)}
+            if self.run_manager:
+                if step:
+                    step = await self.run_manager.fail_step(step, str(exc))
+                    yield {"type": "step_failed", "step": serialize_step(step)}
+
+                resp_text = "".join(response_parts)
+                in_tokens = estimate_context_tokens(prompt)
+                out_tokens = estimate_context_tokens(resp_text)
+                try:
+                    await self.run_manager.record_model_call(
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        request={
+                            "stage": "generation",
+                            "prompt": prompt,
+                            "temperature": self.thread_config.generation.temperature,
+                            "max_tokens": self.thread_config.generation.max_tokens,
+                        },
+                        response={"content": resp_text} if resp_text else None,
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                        total_tokens=in_tokens + out_tokens,
+                        latency_ms=int(elapsed * 1000),
+                        status="failed",
+                        error={"message": str(exc)},
+                    )
+                except Exception as rec_exc:
+                    logger.warning("[QueryPipeline] Failed to record failed model call: %s", rec_exc)
             raise
 
         self._check_cancellation()
@@ -256,6 +334,7 @@ class QueryPipeline:
             thread=self.thread,
             before_sequence=self.message.sequence if self.message else None,
             provider=self.provider,
+            run_manager=self.run_manager,
         )
 
     async def _prepare_stream(self):
@@ -383,7 +462,14 @@ class QueryPipeline:
         The shape of this dict is stable — do not rename keys without a
         corresponding update to ``engine._persist_run_result``.
         """
-        prompt = build_generation_prompt(self.message.content, state.context)
+        prompt = build_generation_prompt(
+            self.message.content,
+            state.context,
+            system_prompt=self.thread_config.generation.system_prompt,
+            citation_enforced=self.thread_config.generation.citation_enforced,
+            chat_mode=self.thread_config.generation.chat_mode,
+            suggest_followups=self.thread_config.generation.suggest_followups,
+        )
         return {
             "original_query": self.message.content,
             "transformed_queries": state.transformed_queries,
@@ -433,6 +519,7 @@ class QueryPipeline:
             provider=self.provider,
             config=self.thread_config.query_transformation,
             memory=memory,
+            run_manager=self.run_manager,
         )
 
     async def _retrieve(self, queries: list[str]):
@@ -459,15 +546,23 @@ class QueryPipeline:
 
         retrieval_config = self.thread_config.retrieval
         if self.thread_config.reranking.enabled:
-            # Expand top_k so the reranker has enough candidates.
-            expanded_top_k = max(
+            # Expand candidate pool so reranker has enough candidates to work with.
+            rerank_target = getattr(self.thread_config.reranking, "top_n", 10)
+            target_candidates = max(
+                retrieval_config.fetch_k,
                 retrieval_config.top_k,
-                self.thread_config.reranking.top_n,
+                rerank_target,
             )
-            # Divide by the number of sub-questions so total fetched remains bounded
-            fetch_per_query = max(1, expanded_top_k // max(1, len(queries)))
+            # Fetch enough candidates per query so deduplication yields adequate pool
+            fetch_per_query = max(
+                retrieval_config.top_k,
+                target_candidates // max(1, len(queries)),
+            )
             retrieval_config = retrieval_config.model_copy(
-                update={"top_k": fetch_per_query}
+                update={
+                    "top_k": target_candidates,
+                    "fetch_k": max(retrieval_config.fetch_k, fetch_per_query),
+                }
             )
 
         results = await self.retrieval_workflow.retrieve(
@@ -519,7 +614,10 @@ class QueryPipeline:
         prompt = build_generation_prompt(
             query,
             context,
+            system_prompt=self.thread_config.generation.system_prompt,
             citation_enforced=self.thread_config.generation.citation_enforced,
+            chat_mode=self.thread_config.generation.chat_mode,
+            suggest_followups=self.thread_config.generation.suggest_followups,
         )
 
         async with self.executor.stream_step(

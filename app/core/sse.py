@@ -36,6 +36,12 @@ class RedisEventPublisher:
 
 publisher = RedisEventPublisher()
 
+
+async def close_sse_redis() -> None:
+    """Close the SSE Redis client on application shutdown."""
+    await redis.close()
+
+
 def create_sse_response(generator: AsyncGenerator) -> StreamingResponse:
     """Helper wrapper for creating a push-based SSE response."""
     async def format_sse():

@@ -16,6 +16,7 @@ class PassThroughTransformer(BaseQueryTransformer):
         provider: BaseGenerationProvider,
         config: QueryTransformationConfig,
         memory: Any = None,
+        run_manager: Any = None,
     ) -> list[str]:
         stripped = query.strip()
         return [stripped] if stripped else []

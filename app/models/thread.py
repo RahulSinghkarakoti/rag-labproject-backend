@@ -20,7 +20,7 @@ class Thread(Base, UUIDMixin, TimestampMixin):
 
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("projects.id", ondelete="SET NULL"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
     )
 

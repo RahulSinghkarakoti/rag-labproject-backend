@@ -38,5 +38,9 @@ def bm25(query: str, documents: list, *, k1: float = 1.2, b: float = 0.75):
 async def retrieve_sparse(vector_store, query: str, *, model: str, top_k: int, filters: dict):
     if model.lower() != "bm25":
         raise ValueError(f"Unsupported sparse retrieval model: {model}")
-    documents = await vector_store.keyword_search(query, filters=filters)
+    candidate_limit = max(top_k * 5, 100)
+    try:
+        documents = await vector_store.keyword_search(query, filters=filters, limit=candidate_limit)
+    except TypeError:
+        documents = await vector_store.keyword_search(query, filters=filters)
     return sorted(bm25(query, documents), key=lambda item: item[1], reverse=True)[:top_k]

@@ -165,24 +165,3 @@ class QueryEngine:
         await self.db.flush()
         run.output_message_id = assistant_message.id
         result["output_message_id"] = str(assistant_message.id)
-
-        if self.run_manager:
-            generation = config.get("generation", {})
-            provider_config = getattr(provider, "config", None)
-
-            transformed_queries = result.get("transformed_queries", [])
-            reranked_documents = result.get("reranked_documents", [])
-
-            await self.run_manager.record_model_call(
-                provider=getattr(provider, "provider_name", generation.get("provider", "unknown")),
-                model=getattr(provider_config, "model", generation.get("model", "unknown")),
-                request={
-                    "query": message.content,
-                    "transformed_queries": transformed_queries,
-                    "document_ids": [doc.get("id") for doc in reranked_documents],
-                    "temperature": generation.get("temperature"),
-                    "max_tokens": generation.get("max_tokens"),
-                },
-                response={"content": result.get("response", "")},
-                status="completed",
-            )

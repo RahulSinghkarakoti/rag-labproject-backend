@@ -78,3 +78,5 @@ async def lifespan(app: FastAPI):
     await init_redis_pool()
     yield
     await close_redis_pool()
+    from app.core.sse import close_sse_redis
+    await close_sse_redis()

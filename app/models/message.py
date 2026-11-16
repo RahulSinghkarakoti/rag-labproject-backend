@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import (
     BigInteger,
     ForeignKey,
+    Index,
     String,
     Text,
 )
@@ -16,6 +17,9 @@ from .base import Base, UUIDMixin
 
 class Message(Base, UUIDMixin):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_thread_sequence", "thread_id", "sequence"),
+    )
 
     thread_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

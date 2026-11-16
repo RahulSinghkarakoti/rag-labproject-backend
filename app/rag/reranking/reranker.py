@@ -61,9 +61,10 @@ class CrossEncoderReranker(BaseReranker):
 
 
 def rerank_documents(queries: list[str], documents: list[Any], config) -> list[Any]:
+    effective_top = getattr(config, "top_n", None) or getattr(config, "top_k", 10)
     return CrossEncoderReranker(
         model=config.model,
-        top_k=config.top_k,
+        top_k=effective_top,
         batch_size=config.batch_size,
         score_threshold=config.score_threshold,
         return_documents=config.return_documents,

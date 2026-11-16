@@ -1,3 +1,4 @@
+import shutil
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,6 +13,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseResponse,
     KnowledgeBaseUpdateRequest,
 )
+from app.services.document_service import UPLOAD_DIR
 
 
 class KnowledgeBaseService:
@@ -190,6 +192,10 @@ class KnowledgeBaseService:
 
         await self.db.delete(kb)
         await self.db.commit()
+
+        kb_dir = (UPLOAD_DIR / str(kb_id)).resolve()
+        if kb_dir.is_relative_to(UPLOAD_DIR.resolve()) and kb_dir.exists():
+            shutil.rmtree(kb_dir, ignore_errors=True)
 
     async def get_knowledge_base_documents(
         self, project_id: UUID, kb_id: UUID, user_id: int

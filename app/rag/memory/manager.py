@@ -86,6 +86,7 @@ class MemoryManager:
         before_sequence: int | None = None,
         provider: BaseGenerationProvider | None = None,
         recent_window_turns: int | None = None,
+        run_manager: Any = None,
     ) -> tuple[list[dict[str, Any]], str | None, bool]:
         """
         Load conversation context applying progressive compaction.
@@ -191,7 +192,7 @@ class MemoryManager:
                     for m in unsummarized_older
                 ]
                 updated_summary = await summarizer.summarize_turns(
-                    existing_summary, turns_to_compact
+                    existing_summary, turns_to_compact, run_manager=run_manager
                 )
 
                 if updated_summary:

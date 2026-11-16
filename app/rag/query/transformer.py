@@ -10,6 +10,7 @@ async def transform_query(
     provider: BaseGenerationProvider,
     config: QueryTransformationConfig | dict | None = None,
     memory: Any = None,
+    run_manager: Any = None,
 ) -> list[str]:
     """
     Transforms the query into one or more retrieval queries using the configured technique.
@@ -20,4 +21,5 @@ async def transform_query(
         provider=provider,
         config=config,
         memory=memory,
+        run_manager=run_manager,
     )

@@ -22,7 +22,7 @@ class RunService:
             select(Run)
             .join(Thread, Run.thread_id == Thread.id)
             .join(Project, Thread.project_id == Project.id)
-            .options(selectinload(Run.steps))
+            .options(selectinload(Run.steps), selectinload(Run.model_calls))
             .where(Run.id == run_id, Project.user_id == user_id)
         )
         if not run:
@@ -62,7 +62,7 @@ class RunService:
                 target_uuid = UUID(str(run_id_str))
                 run = await self.db.scalar(
                     select(Run)
-                    .options(selectinload(Run.steps))
+                    .options(selectinload(Run.steps), selectinload(Run.model_calls))
                     .where(Run.id == target_uuid)
                 )
             except (ValueError, TypeError):
@@ -71,7 +71,7 @@ class RunService:
         if not run:
             run = await self.db.scalar(
                 select(Run)
-                .options(selectinload(Run.steps))
+                .options(selectinload(Run.steps), selectinload(Run.model_calls))
                 .where(
                     (Run.output_message_id == message_id)
                     | (Run.input_message_id == message_id)
