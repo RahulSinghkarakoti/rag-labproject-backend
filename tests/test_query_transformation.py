@@ -99,9 +99,9 @@ def test_thread_config_extra_forbidden():
 
 def test_generation_config_provider_auto_inference():
     # Inferred from model name
-    cfg_gemini = GenerationConfig.model_validate({"model": "gemini-2.5-pro"})
+    cfg_gemini = GenerationConfig.model_validate({"model": "gemini-3.8-flash"})
     assert cfg_gemini.provider == "gemini"
-    assert cfg_gemini.model == "gemini-2.5-pro"
+    assert cfg_gemini.model == "gemini-3.8-flash"
 
     cfg_groq = GenerationConfig.model_validate({"model": "gpt-oss-120b"})
     assert cfg_groq.provider == "groq"

@@ -138,15 +138,6 @@ class QueryEngine:
             return
 
         now = datetime.now(UTC)
-        docs = result.get("reranked_documents", []) or result.get("retrieved_documents", [])
-        citations = []
-        for i, doc in enumerate(docs, start=1):
-            citations.append({
-                "index": i,
-                "name": doc.get("name", "Unknown"),
-                "mime_type": doc.get("mime_type")
-            })
-
         assistant_message = Message(
             thread_id=message.thread_id,
             parent_message_id=message.id,
@@ -156,7 +147,6 @@ class QueryEngine:
             status="completed",
             metadata_={
                 "run_id": str(run.id),
-                "citations": citations,
                 "context_window": result.get("context_window"),
                 "created_at": now.isoformat(),
             },

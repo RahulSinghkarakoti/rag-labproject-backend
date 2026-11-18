@@ -19,6 +19,8 @@ from app.rag.memory.context import (
 )
 from app.rag.query.sub_queries import SubQueryDecomposer
 from app.rag.query.hyde import HyDETransformer
+from app.rag.query.rewriter import QueryRewriter
+from app.rag.query.step_back import StepBackTransformer
 
 
 def test_reranking_config_top_n_sync():
@@ -125,3 +127,74 @@ async def test_hyde_transformer_query_count_cap():
 
     queries = await transformer.transform("complex query", mock_provider, config)
     assert len(queries) == 7
+
+
+@pytest.mark.anyio
+async def test_rewrite_and_step_back_ignore_query_count():
+    """Verify rewrite and step_back produce 1 query regardless of query_count."""
+    mock_provider = AsyncMock()
+    mock_provider.model = None
+    mock_provider.ainvoke.return_value = "rewritten line 1\nrewritten line 2"
+    mock_provider.ainvoke_safe.return_value = "rewritten line 1\nrewritten line 2"
+
+    rewriter = QueryRewriter()
+    config_rewrite = ThreadConfig().query_transformation.model_copy(
+        update={"mode": "rewrite", "query_count": 8, "include_original": False}
+    )
+    res_rewrite = await rewriter.transform("original query", mock_provider, config_rewrite)
+    assert len(res_rewrite) == 1
+    assert res_rewrite[0] == "rewritten line 1"
+
+    step_back = StepBackTransformer()
+    config_step_back = ThreadConfig().query_transformation.model_copy(
+        update={"mode": "step_back", "query_count": 8, "include_original": False}
+    )
+    res_step_back = await step_back.transform("original query", mock_provider, config_step_back)
+    assert len(res_step_back) == 1
+    assert res_step_back[0] == "rewritten line 1"
+
+
+def test_query_pipeline_rerank_forces_return_documents(monkeypatch):
+    """Verify QueryPipeline._rerank enforces return_documents=True even if incoming config is False."""
+    from app.rag.pipeline.query import QueryPipeline
+
+    class DummyDoc:
+        def __init__(self, doc_id, content):
+            self.id = doc_id
+            self.content = content
+            self.rerank_score = 0.0
+
+    captured_config = []
+
+    def mock_rerank_documents(queries, documents, config):
+        captured_config.append(config)
+        return documents
+
+    monkeypatch.setattr("app.rag.pipeline.query.rerank_documents", mock_rerank_documents)
+
+    mock_db = MagicMock()
+    mock_run = MagicMock()
+    mock_thread = MagicMock()
+    mock_message = MagicMock(content="test question")
+    mock_provider = MagicMock()
+
+    cfg = ThreadConfig()
+    cfg.reranking = cfg.reranking.model_copy(update={"enabled": True, "return_documents": False})
+
+    pipeline = QueryPipeline(
+        db=mock_db,
+        config=cfg,
+        run=mock_run,
+        thread=mock_thread,
+        message=mock_message,
+        provider=mock_provider,
+    )
+
+    import anyio
+    docs = [DummyDoc("1", "content 1")]
+    results = anyio.run(pipeline._rerank, ["test question"], docs)
+
+    assert len(captured_config) == 1
+    assert captured_config[0].return_documents is True
+    assert results == docs
+

@@ -144,3 +144,56 @@ def test_v1_mount_routes():
     assert len(v1_paths) > 0, "No /api/v1 routes found"
     assert len(api_paths) == 0, f"Found unversioned /api routes that should be disabled: {api_paths}"
 
+
+def test_message_response_strips_citations_from_metadata():
+    from app.schemas.thread import MessageResponse
+
+    msg_id = uuid4()
+    thread_id = uuid4()
+    raw_data = {
+        "id": msg_id,
+        "thread_id": thread_id,
+        "parent_message_id": None,
+        "role": "assistant",
+        "content": "Test content",
+        "content_json": None,
+        "sequence": 1,
+        "status": "completed",
+        "metadata": {
+            "run_id": "dce755c6-70c5-4167-9341-d60cf8d6bede",
+            "created_at": "2026-11-18T15:43:01.910849+00:00",
+            "citations": [
+                {"name": "01_product_overview.md", "index": 1, "mime_type": "text/markdown"},
+                {"name": "01_product_overview.md", "index": 2, "mime_type": "text/markdown"},
+            ],
+            "context_window": {"limit": 8192, "tokens": 622},
+        },
+    }
+
+    validated = MessageResponse.model_validate(raw_data)
+    assert "citations" not in validated.metadata
+    assert validated.metadata["run_id"] == "dce755c6-70c5-4167-9341-d60cf8d6bede"
+    assert validated.metadata["context_window"] == {"limit": 8192, "tokens": 622}
+
+    # Also test from ORM Message object with metadata_ attribute
+    from app.models.message import Message
+
+    orm_msg = Message(
+        id=msg_id,
+        thread_id=thread_id,
+        role="assistant",
+        content="ORM content",
+        sequence=2,
+        status="completed",
+        metadata_={
+            "run_id": "run-123",
+            "citations": [{"name": "test.pdf", "index": 1}],
+            "created_at": "2026-11-18T15:43:01Z",
+        },
+    )
+    validated_orm = MessageResponse.model_validate(orm_msg)
+    assert "citations" not in validated_orm.metadata
+    assert validated_orm.metadata["run_id"] == "run-123"
+
+
+

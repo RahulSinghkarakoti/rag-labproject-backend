@@ -200,6 +200,17 @@ class MessageResponse(BaseModel):
     content_json: Any | None = None
     sequence: int
     status: str
-    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="metadata_")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, validation_alias=AliasChoices("metadata_", "metadata")
+    )
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def strip_citations(cls, v: Any) -> Any:
+        if isinstance(v, dict) and "citations" in v:
+            clean = dict(v)
+            clean.pop("citations", None)
+            return clean
+        return v

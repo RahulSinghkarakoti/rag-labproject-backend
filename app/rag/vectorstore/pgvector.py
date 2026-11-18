@@ -66,6 +66,9 @@ class PgVectorStore(BaseVectorStore):
                 embedding_model=combined_metadata.get(
                     "embedding_model"
                 ),
+                embedding_dimension=combined_metadata.get(
+                    "embedding_dimension"
+                ),
                 metadata_=combined_metadata,
             )
 
